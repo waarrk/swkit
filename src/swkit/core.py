@@ -660,31 +660,20 @@ class Doc:
         key = (j, str(expr))
         if key in self._ref:
             return self._ref[key]
-        target = [0.0, 0.0, 0.0]
-        target[j] = v * MM
-        # オフセットが法線の + 側へ出るか − 側へ出るかは、その基準平面で最初に 1 回だけ実測し、以後は使い回す
-        known = self._flip.get(base)
-        tries = ((known != (v > 0)),) if known is not None else (False, True)
-        for flip in tries:
+        # 既定の平面からのオフセットは、反転なしで + 側、反転ありで − 側へ出る。
+        # 作った平面の位置は平面自身の変換行列から読んで確かめる（確認用のスケッチは開かない）。
+        # テンプレートの平面の向きが標準と違って逆側に出た場合だけ、消して反対向きに作り直す
+        want = self._flip.get(base, False) != (v < 0)
+        for flip in (want, not want):
             self.doc.ClearSelection2(True)
             self.planes()[base].Select2(False, 0)
             f = self.doc.FeatureManager.InsertRefPlane(8 | (256 if flip else 0), abs(v) * MM, 0, 0, 0, 0)
             if f is None:
                 raise RuntimeError(f"基準平面を作れない: {expr}")
-            ok = True
-            if known is None:                    # 作った平面の位置をスケッチ座標系で確かめる
-                self.doc.ClearSelection2(True)
-                f.Select2(False, 0)
-                sm = self.doc.SketchManager
-                sm.InsertSketch(True)
-                xf = call0(sm, "ActiveSketch").ModelToSketchTransform
-                q = M(M(self.sw.math, "CreatePoint", _dbl_array(target)), "MultiplyTransform", xf).ArrayData
-                sm.InsertSketch(True)
-                ok = abs(q[2]) < 1e-7
             self.doc.ClearSelection2(True)
-            if ok:
-                # flip なしで + 側に出るなら True。次からは (known != (v > 0)) で flip を決める
-                self._flip[base] = (flip != (v > 0))
+            pos = call0(f, "GetSpecificFeature2").Transform.ArrayData[9 + j]
+            if abs(pos - v * MM) < 1e-7:
+                self._flip[base] = flip != (v < 0)     # True = この文書の平面は標準と逆向き
                 f.Name = self.labels.get(str(expr)) or f"{'XYZ'[j]}面 {expr}".replace(' / ', '÷').replace('=', ' ')
                 self.link_feature(f, expr)
                 self._ref[key] = f
@@ -926,8 +915,11 @@ class Part(Doc):
     def keep_sketch(self, name):
         """フィーチャにせずスケッチのまま残す（レイアウト用）。"""
         self._s.define()
+        feat = M(self.doc, "FeatureByPositionReverse", 0)     # 開いているスケッチ（いちばん新しいフィーチャ）
         self.doc.SketchManager.InsertSketch(True)
         self.doc.ClearSelection2(True)
+        if feat is not None and call0(feat, "GetTypeName2") in ("ProfileFeature", "3DProfileFeature"):
+            feat.Name = name
 
     # ------------------------------------------------------------ フィレット・面取り
     @timed("エッジ探索")
@@ -1146,8 +1138,11 @@ class Asm(Doc):
 
     def keep_sketch(self, name):
         self._s.define()
+        feat = M(self.doc, "FeatureByPositionReverse", 0)     # 開いているスケッチ（いちばん新しいフィーチャ）
         self.doc.SketchManager.InsertSketch(True)
         self.doc.ClearSelection2(True)
+        if feat is not None and call0(feat, "GetTypeName2") in ("ProfileFeature", "3DProfileFeature"):
+            feat.Name = name
 
     def axis_x(self):
         """X 軸（正面∩平面）の基準軸。構成部品の円形パターンの中心。"""

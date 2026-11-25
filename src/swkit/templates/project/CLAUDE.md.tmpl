@@ -1,0 +1,29 @@
+# {{name}}
+
+SOLIDWORKS の設計プロジェクト。CAD は swkit（https://github.com/waarrk/swkit）で生成する。
+
+## 最初に
+
+- 設計者スキル `swkit-designer` を読んでから作業する（`swkit setup` で入る。無ければ `swkit skill`）。
+  スキルが使えない環境では、swkit の `src/swkit/templates/skill/SKILL.md` と `MODELING_RULES.md` を読む。
+- `swkit doctor` で環境を確かめる。
+
+## このプロジェクトの決まり
+
+- 設計値は `ANALYSIS/params.py` の 1 か所に置く。CAD と事前計算の両方がここから読む。数値をほかの場所に直書きしない。
+- 形と配置は `src/{{pkg}}/build.py` に書く。`CAD/` 配下は生成物で、手で直した内容は再生成で消える。
+- 作り直す: `python src/{{pkg}}/build.py`。結果（質量、干渉、拘束、画像）は `ANALYSIS/out/` と `Doc/IMAGES/` に出る。
+- 設計の判断と残る確認事項は `Doc/DESIGN_SHEET/` に、部品表は `Doc/PART_LIST/` に置く。
+- メーカー配布の 3D データは `CAD_SOURCE/vendor/` に置き、入手元を記録する。
+- SOLIDWORKS を操作するスクリプトを 2 本同時に走らせない。ユーザーが開いているほかの文書を閉じない。
+
+## フォルダ
+
+```
+ANALYSIS/        設計パラメータ、事前計算、計算結果（out/）
+CAD/             生成した部品・アセンブリ（00_既製品、01_<製品>/<ユニット>）
+CAD_SOURCE/      メーカー配布データ（取り込み元）
+Doc/             設計シート、部品表、画像
+QUOTE/           見積り
+src/{{pkg}}/     生成スクリプト
+```

@@ -11,25 +11,51 @@ SOLIDWORKS を Python（COM）から操作して、**人が後から開いて直
 | `swkit.project` | 材料・プロパティの設定、基準平面への合致での配置、質量集計、アセンブリから加工部品へ反映する共締め穴、干渉・拘束状態の確認、画像・STEP の書き出し、部品のキャッシュ |
 | `swkit.vendor` | メーカー配布の 3D データ（STEP / IGES / SLDPRT）の取り込みと向きそろえ |
 | `swkit.inspect_part` | 部品のフィーチャ構成・スケッチの定義状態・関係式の一覧（点検用） |
+| `swkit.rapid` | MISUMI RAPiD Design から型番指定で部品モデルを取り込む（画面操作） |
+| `swkit.cli` | `swkit doctor / setup / new / skill`（導入と点検、プロジェクトの骨組み） |
 | `swkit.config` | PC ごとの設定（SOLIDWORKS の版、テンプレート） |
 
-モデルの作り方の決まりは [docs/MODELING_RULES.md](docs/MODELING_RULES.md) にあります。
+モデルの作り方の決まりは [src/swkit/templates/skill/MODELING_RULES.md](src/swkit/templates/skill/MODELING_RULES.md) にあります。
 
 ## 必要なもの
 
 - Windows、SOLIDWORKS（2024 で確認）
 - Python 3.10 以上、pywin32
 
-## インストール
+## 導入（どの PC でも同じ手順）
 
 ```
-pip install -e <このリポジトリのパス>
+git clone git@github.com:waarrk/swkit.git
+python -m venv .venv
+.venv\Scripts\pip install -e swkit[rapid]
+.venv\Scripts\swkit setup
 ```
+
+`swkit setup` が行うこと:
+
+1. 入っている SOLIDWORKS の版とテンプレートを調べて、PC ごとの設定 `%USERPROFILE%\.swkit.json` を作る
+2. 設計者スキル `swkit-designer` を `%USERPROFILE%\.claude\skills\` に入れる
+3. `swkit doctor` で環境を点検する（SOLIDWORKS、テンプレート、pywin32、RAPiD Design、スキル）
+
+設計者スキルは、Claude Code が SOLIDWORKS の設計作業をするときに読む手順書です。完全定義スケッチ、加工工程ごとのフィーチャ、
+フィレット・穴ウィザード・パターンの使い方、アセンブリからの設計、購入品の実データと在庫確認、部品表、設計レビューなど、
+実際の設計で設計者から受けた指摘をまとめてあります。これを入れた PC では、同じ決まりで設計が始まります。
+
+## 設計を始める
+
+```
+.venv\Scripts\swkit new <プロジェクト名>
+cd <プロジェクト名>
+python src\<名前>uild.py
+```
+
+`swkit new` は、設計パラメータ（`ANALYSIS/params.py`）、生成スクリプトの見本（台板とブロックを共締めする最小の例）、
+プロジェクトの決まり（`CLAUDE.md`）、フォルダ構成を作ります。見本を自分の設計に書き換えて使います。
 
 ## 設定
 
-SOLIDWORKS の既定テンプレートが有効なら設定は要りません。版を指定したいとき、または既定テンプレートが
-無効な PC では、`%USERPROFILE%\.swkit.json` を置きます（環境変数 `SWKIT_PROGID` などでも上書きできます）。
+設定は `swkit setup` が作ります。手で直すときは `%USERPROFILE%\.swkit.json` を編集します（環境変数 `SWKIT_PROGID` などでも上書きできます）。
+テンプレートを空にすると、SOLIDWORKS の既定テンプレートを使います。
 
 ```json
 {

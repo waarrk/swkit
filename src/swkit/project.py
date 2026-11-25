@@ -17,7 +17,7 @@ import shutil
 import time
 from pathlib import Path
 
-from .core import SW, M, Part, Profile, call0, timed
+from .core import SW, Asm, M, Part, Profile, call0, timed
 
 I3 = ((1, 0, 0), (0, 1, 0), (0, 0, 1))
 FLIP_X = ((-1, 0, 0), (0, 1, 0), (0, 0, -1))        # Y 軸まわり 180°
@@ -92,6 +92,7 @@ class Project:
         self._cache_dir = self.cad_root.parent / ".swkit_cache"
         idx = self._cache_dir / "index.json"
         self._cache = json.loads(idx.read_text(encoding="utf-8")) if idx.exists() and use_cache else {}
+        self._use_cache = use_cache
 
     # ------------------------------------------------------------ 文書
     def new_part(self):
@@ -164,8 +165,12 @@ class Project:
             raise FileNotFoundError(f"{path} が無い。swkit.rapid で取り込んでおく")
         part = Part(self.sw, self.sw.open(path), self.P)
         if rho:
-            part.set_density(rho)
-            part.save()
+            # 密度は 1 回だけ設定する。毎回保存するとファイルの更新時刻が変わり、ユニットの使い回しが効かなくなる
+            pm = M(part.ext, "CustomPropertyManager", "")
+            if (M(pm, "Get", "swkit_密度") or "") != f"{rho:g}":
+                part.set_density(rho)
+                part.set_prop("swkit_密度", f"{rho:g}")
+                part.save()
         m, v, cg = part.mass()
         self.parts[path.stem] = (path, m, v, cg)
         return path.stem
@@ -254,12 +259,19 @@ class Project:
             layout(top)
             top.save()
         lap("3. 部品とサブアセンブリ")
+        hole_units = {t[0] for h in holes for t in h["targets"]}
         for name, _, fn in units:
             lap(f" [{name}]")
+            key = None if name in hole_units else self._unit_key(fn)
+            if key is not None and self._unit_restore(name, key, subs):
+                continue
+            n0 = len(self.instances)
             fn(subs[name])
             subs[name].rebuild()
             subs[name].set_prop("品名", name)
             subs[name].save()
+            if key is not None:
+                self._unit_keep(name, key, subs[name], n0)
         first = [name for name in subs if any(name == t[0] for h in holes for t in h["targets"])]
         lap(f"4. トップアセンブリ（穴に関わるユニット: {'、'.join(first) or 'なし'}）")
         for name in first:
@@ -287,6 +299,77 @@ class Project:
         Path(out_dir or self.cad_root).joinpath("build_profile.json").write_text(
             json.dumps({"total_seconds": round(time.time() - t0, 1), "by_kind": prof}, ensure_ascii=False, indent=1), encoding="utf-8")
         return top, subs
+
+    # ------------------------------------------------------------ ユニットの使い回し
+    def _unit_key(self, fn):
+        """既製品を並べるだけのユニットなら、その内容を表すキーを返す。部品を作るユニットは None（使い回さない）。
+
+        キーは「ユニットを組み立てるメソッドと、そこから呼ぶ設計側のメソッドのソース＋そこに出てくる設計変数の値」。
+        部品を作るユニットは、部品ごとの cached_part に任せる（穴フィーチャが後から部品へ反映されるため）。
+        """
+        if not self._use_cache:
+            return None
+        seen, src = set(), []
+
+        def add(f):
+            code = inspect.getsource(f)
+            src.append(code)
+            for n in re.findall(r"self\.(\w+)\(", code):
+                m = getattr(type(self), n, None)
+                if m is not None and n not in seen and not hasattr(Project, n):
+                    seen.add(n)
+                    add(m)
+        add(fn)
+        text = "".join(src)
+        if re.search(r"new_part\(|\.finish\(|\.vendor\(|\.cable\(", text):
+            return None
+        names = sorted(n for n in set(re.findall(r"[A-Z][A-Z0-9_]{2,}", text)) if hasattr(self.P, n))
+        deps = "".join(f"{n}={getattr(self.P, n)!r};" for n in names)
+        project_src = Path(__file__).read_text(encoding="utf-8")
+        return hashlib.sha1((text + deps + self._kit_src + project_src).encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _stamp(path):
+        st = Path(path).stat()
+        return [st.st_size, int(st.st_mtime)]
+
+    def _unit_keep(self, name, key, asm, n0):
+        """組み上がったユニットを控える。"""
+        keep = f"unit_{hashlib.sha1(name.encode('utf-8')).hexdigest()[:12]}.SLDASM"
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(asm.path, self._cache_dir / keep)
+        inst = self.instances[n0:]
+        parts = sorted({i["part"] for i in inst})
+        self._cache[f"unit:{name}"] = {
+            "key": key, "file": keep, "instances": inst,
+            "comp": {k[1]: v for k, v in self.comp.items() if k[0] == name},
+            "parts": {n: {"path": str(self.parts[n][0]), "stamp": self._stamp(self.parts[n][0]), "mass": self.parts[n][1],
+                          "volume": self.parts[n][2], "cg": list(self.parts[n][3])} for n in parts}}
+        (self._cache_dir / "index.json").write_text(json.dumps(self._cache, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    def _unit_restore(self, name, key, subs):
+        """控えが今の内容と同じなら、保存済みのサブアセンブリに差し替える。差し替えたら True。"""
+        ent = self._cache.get(f"unit:{name}")
+        if not ent or ent["key"] != key or not (self._cache_dir / ent["file"]).exists():
+            return False
+        for n, q in ent["parts"].items():            # 使っている部品ファイルが控えたときのままか
+            if not Path(q["path"]).exists() or self._stamp(q["path"]) != q["stamp"]:
+                return False
+        asm = subs[name]
+        path = asm.path
+        self.sw.app.CloseDoc(call0(asm.doc, "GetTitle"))
+        shutil.copy2(self._cache_dir / ent["file"], path)
+        new = Asm(self.sw, self.sw.open(path), self.P)
+        new.path = path
+        new.labels = dict(self.labels)
+        subs[name] = new
+        for n, q in ent["parts"].items():
+            self.parts[n] = (Path(q["path"]), q["mass"], q["volume"], tuple(q["cg"]))
+        self.instances.extend(ent["instances"])
+        for part, comps in ent["comp"].items():
+            self.comp[(name, part)] = list(comps)
+        print(f"  ユニット {name}: 変更なし。保存済みのサブアセンブリを使用（構成部品 {len(ent['instances'])} 個）")
+        return True
 
     # ------------------------------------------------------------ 出力
     def outputs(self, top, subs, out_dir, image_dir, step_path, prefix):

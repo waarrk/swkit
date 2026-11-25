@@ -1,0 +1,92 @@
+"""{{name}} の CAD を生成する。
+
+    python src/{{pkg}}/build.py              全体（トップアセンブリ、質量、干渉、画像、STEP）
+    python src/{{pkg}}/build.py --no-cache   部品を使い回さずに全部作り直す
+    python src/{{pkg}}/build.py --show       作る過程を画面で見る（遅い）
+
+SOLIDWORKS の操作は swkit に任せ、このファイルには {{name}} の形と配置だけを書く。
+手順: トップアセンブリとレイアウトスケッチ → 部品とサブアセンブリ → 基準平面への合致 →
+      アセンブリの穴フィーチャを加工部品へ反映 → 干渉・拘束の確認と書き出し（swkit.Project.build）。
+下の台板とブロックは書き方の見本。自分の設計に置き換える。
+"""
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "ANALYSIS"))
+
+import params as P  # noqa: E402
+from swkit import SW, Project, cached_part  # noqa: E402
+
+CAD = ROOT / "CAD"
+TOP = CAD / "01_{{name}}"
+D_BASE = TOP / "01_台"
+OUT = ROOT / "ANALYSIS" / "out"
+
+# アセンブリに定義する基準平面の名前（位置の式 -> 名前）。名前の無い式は式そのものが名前になる
+LABELS = {
+    "BASE_T / 2": "台板 板厚中心",
+    "BASE_T + BLOCK_H / 2": "ブロック 高さ中心",
+}
+
+
+class Builder(Project):
+    def __init__(self, use_cache=True):
+        super().__init__(P, CAD, LABELS, use_cache=use_cache)
+
+    # ------------------------------------------------------------ レイアウト
+    def layout(self, top):
+        """トップアセンブリのレイアウトスケッチ。配置の骨格で、寸法は部品と同じ変数につながる。"""
+        s = top.sketch("top")
+        s.rect("-BASE_L / 2", "BASE_L / 2", "-BASE_W / 2", "BASE_W / 2")
+        s.rect("-BLOCK_L / 2", "BLOCK_L / 2", "-BLOCK_W / 2", "BLOCK_W / 2")
+        top.keep_sketch("平面レイアウト")
+
+    # ------------------------------------------------------------ 部品
+    @cached_part
+    def base(self):
+        """台板。基準: 前後・左右の中心線と板厚中心。板から輪郭を切り出すだけの形にする。"""
+        p = self.new_part()
+        s = p.sketch("top")
+        s.rect("-BASE_L / 2", "BASE_L / 2", "-BASE_W / 2", "BASE_W / 2")      # 中心線に対称、全幅の寸法 1 本ずつ
+        p.extrude_mid("BASE_T", "板 外形切り出し")
+        p.fillet([(x, 0, z) for x in ("-BASE_L / 2", "BASE_L / 2") for z in ("-BASE_W / 2", "BASE_W / 2")], "BASE_R", "外周 角R")
+        return self.finish(p, D_BASE / "台板.SLDPRT", P.A5052, 加工方法="板 t10 から輪郭を切り出す",
+                           加工基準="前後・左右の中心線", 備考="固定穴はアセンブリの穴フィーチャから反映")
+
+    @cached_part
+    def block(self):
+        """ブロック。基準: 中心線と高さの中央。"""
+        p = self.new_part()
+        s = p.sketch("top")
+        s.rect("-BLOCK_L / 2", "BLOCK_L / 2", "-BLOCK_W / 2", "BLOCK_W / 2")
+        p.extrude_mid("BLOCK_H", "角材 切断")
+        return self.finish(p, D_BASE / "ブロック.SLDPRT", P.A5052, 加工方法="角材を切断、上面から穴あけ",
+                           加工基準="中心線、下面", 備考="固定穴はアセンブリの穴フィーチャから反映")
+
+    # ------------------------------------------------------------ ユニット
+    def base_asm(self, asm):
+        u = "台"
+        self.place(asm, self.base(), t=(0, "BASE_T / 2", 0), unit=u)
+        self.place(asm, self.block(), t=(0, "BASE_T + BLOCK_H / 2", 0), unit=u)
+
+    # ------------------------------------------------------------ 共締め穴
+    def shared_holes(self):
+        """相手と共締めする穴。トップアセンブリの穴フィーチャ 1 つで開け、両方の部品へ反映する。"""
+        H = self.shared_hole
+        pts = [(x, 0) for x in ("BOLT_X", "-BOLT_X")]
+        return [H("top", "BASE_T + BLOCK_H", pts, "Ø5.5", "固定穴 M5", [("台", "ブロック"), ("台", "台板")], "BLOCK_H + BASE_T + 2")]
+
+    def run(self):
+        units = (("台", D_BASE, self.base_asm),)
+        self.build(TOP / "{{name}}.SLDASM", units, self.shared_holes(), layout=self.layout, title="{{name}}",
+                   out_dir=OUT, image_dir=ROOT / "Doc" / "IMAGES", prefix="{{name}}")
+
+
+if __name__ == "__main__":
+    SW.SHOW = "--show" in sys.argv
+    b = Builder(use_cache="--no-cache" not in sys.argv)
+    try:
+        b.run()
+    finally:
+        b.sw.restore()
