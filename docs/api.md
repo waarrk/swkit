@@ -49,6 +49,7 @@ SOLIDWORKS API(COM) の薄いラッパ。
 | `rect(u0, u1, v0, v1)` | 辺が軸に平行な長方形．4辺の位置を式で与える． |
 | `circle(u, v, d)` | 中心 (u, v)，直径 d の円． |
 | `half_circle(r, upper)` | 原点中心の半円弧（筒受けの受け面）。端点は同じ位置にある線の端点と結合される。 |
+| `arc(p0, p1, r, toward, concentric=None, center=None)` | p0 から p1 への円弧（劣弧）。半径 r は式につなぐ。 |
 | `point(u, v)` | 位置決め用の点（レイアウトで構成部品を合致させる相手）。 |
 | `hole_points(pts)` | 穴位置スケッチの点。穴ウィザードが置いた点はそのまま使い、残りを追加する。 |
 | `convert(pts, construction=False)` | エンティティ変換: モデル座標 pts (x, y, z) mm を通る既存のエッジを、このスケッチへ投影する。 |
@@ -69,6 +70,7 @@ SOLIDWORKS API(COM) の薄いラッパ。
 | `rebuild()` | 関係式を評価して再構築する． |
 | `set_prop(name, value)` | ユーザー定義プロパティを設定する． |
 | `export(path)` | STEP などの形式で書き出す．形式は拡張子で決まる． |
+| `section(base='front', on=True, reverse=False)` | 基準平面 base（front / top / right）で切った断面表示にする。on=False で元に戻す。 |
 | `planes()` | 正面・平面・右側面（言語に依らず先頭 3 つの参照平面）。1 回探したら覚えておく。 |
 | `plane_names()` | 正面・平面・右側面の名前を返す． |
 | `ref_plane(j, expr)` | 軸 j（0 = X, 1 = Y, 2 = Z）に垂直で、座標が expr の基準平面。0 なら既定の平面を返す。 |
@@ -120,6 +122,7 @@ SOLIDWORKS API(COM) の薄いラッパ。
 | `keep_sketch(name)` | スケッチを閉じ，名前を付けてレイアウトスケッチとして残す． |
 | `axis_x()` | X 軸（正面∩平面）の基準軸。構成部品の円形パターンの中心。 |
 | `circular(comp, n, name)` | 構成部品を中心軸まわりに等配 n 個（構成部品の円形パターン）。 |
+| `linear(comp, n, pitch, name)` | 構成部品を中心軸（X）の + 方向へピッチ pitch で n 個に並べる（構成部品の直線パターン）。 |
 | `unconstrained()` | 完全に拘束されていない構成部品の名前。 |
 | `interference()` | 干渉している部品対の一覧 [(名前1, 名前2, 体積 mm3)]。 |
 
@@ -146,6 +149,7 @@ SOLIDWORKS API(COM) の薄いラッパ。
 | `record(name, rows, t, unit, comp=None)` | 配置した 1 個の質量・体積・重心を控える。t は数値 mm。 |
 | `place(asm, name, rows=I3, t=(0, 0, 0), unit='')` | 軸に平行な姿勢の部品を、アセンブリの基準平面 3 枚に一致させて拘束する。t は式。 |
 | `ring_of(asm, name, x, pcd, n, unit, label)` | X 軸まわりの PCD 上の 1 個を合致で拘束し、構成部品の円形パターンで n 個にする。 |
+| `row_of(asm, name, t, pitch, n, unit, label, rows=I3)` | 位置 t の 1 個を合致で拘束し、構成部品の直線パターンで X の + 方向へ n 個に並べる。 |
 | `comps(top, unit, name, first_only=False)` | トップアセンブリから見た構成部品（サブアセンブリ unit の中の部品 name）。 |
 | `shared_hole(base, w, pts, size, name, targets, depth, from_pos=True)` | 相手部品と共締めする穴の宣言。build() がトップアセンブリの穴フィーチャとして開け、加工部品へ反映する。 |
 | `build(top_path, units, holes=(), layout=None, title=None, out_dir=None, image_dir=None, prefix='asm')` | アセンブリから設計する手順をまとめて実行する。 |
@@ -218,7 +222,7 @@ swkit のコマンド。
 | `doctor()` | 環境を点検して結果を表示する．問題が無ければ 0 を返す． |
 | `install_skill()` | 設計者スキルを利用者のスキルフォルダへ入れる． |
 | `setup()` | 設定ファイルを作り，設計者スキルを入れ，環境を点検する． |
-| `new(name, where='.', code=None)` | プロジェクトの骨組みを作る。code は文書番号の先頭に付ける英数字（例: UWD01）。 |
+| `new(name, where='.', code=None, into=False)` | プロジェクトの骨組みを作る。code は文書番号の先頭に付ける英数字（例: UWD01）。 |
 | `main(argv=None)` | コマンドを解釈して実行する． |
 
 ## swkit.config

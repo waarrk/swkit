@@ -197,9 +197,20 @@ class Project:
         seed = self.place(asm, name, t=(x, f"{pcd} / 2", 0), unit=unit)
         asm.circular(seed, n, label)
         r, x0 = asm.val(pcd) / 2, asm.val(x)
-        for i in range(1, n):
+        for i in range(1, n):                            # 2 個目以降は X 軸まわりに回した姿勢で控える（重心の向きも回る）
             a = math.radians(360 * i / n)
-            self.record(name, I3, (x0, r * math.cos(a), r * math.sin(a)), unit)
+            c, s = math.cos(a), math.sin(a)
+            self.record(name, ((1, 0, 0), (0, c, s), (0, -s, c)), (x0, r * c, r * s), unit)
+
+    def row_of(self, asm, name, t, pitch, n, unit, label, rows=I3):
+        """位置 t の 1 個を合致で拘束し、構成部品の直線パターンで X の + 方向へ n 個に並べる。"""
+        seed = self.place(asm, name, rows, t, unit=unit)
+        if n > 1:
+            asm.linear(seed, n, pitch, label)
+        t0, dx = [asm.val(c) for c in t], asm.val(pitch)
+        for i in range(1, n):
+            self.record(name, rows, (t0[0] + i * dx, t0[1], t0[2]), unit)
+        return seed
 
     def comps(self, top, unit, name, first_only=False):
         """トップアセンブリから見た構成部品（サブアセンブリ unit の中の部品 name）。
@@ -404,6 +415,13 @@ class Project:
             top.doc.ShowNamedView2("", view)
             M(top.doc, "ViewZoomtofit2")
             top.export(image_dir / f"{prefix}_{tag}.png")
+        # 断面: 正面の基準平面で切り、正面と等角から書き出す（被覆や筒の中の構成を図にする）
+        if top.section("front"):
+            for view, tag in ((1, "section"), (7, "section_iso")):
+                top.doc.ShowNamedView2("", view)
+                M(top.doc, "ViewZoomtofit2")
+                top.export(image_dir / f"{prefix}_{tag}.png")
+            top.section(on=False)
         try:
             top.ext.SetUserPreferenceToggle(198, 0, False)
         except Exception:

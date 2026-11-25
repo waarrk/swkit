@@ -2,7 +2,7 @@
 
     swkit doctor            環境の点検（SOLIDWORKS、テンプレート、pywin32、RAPiD Design、設計者スキル）
     swkit setup             この PC 用の設定（~/.swkit.json）を作り、設計者スキルを入れる
-    swkit new <名前> [場所] [--code 文書番号の先頭]  設計プロジェクトの骨組みを作る
+    swkit new <名前> [場所] [--code 文書番号の先頭] [--into]  設計プロジェクトの骨組みを作る（--into は既にあるフォルダへ足す）
     swkit skill             設計者スキル（Claude Code 用）だけを入れ直す
 
 どの PC でも `pip install` のあと `swkit setup` を 1 回実行すれば、同じ決まりで設計を始められる。
@@ -134,12 +134,15 @@ DOC_DIRS = ("00_管理", "01_計画", "02_要求", "03_設計/計算書", "03_�
             "08_購買/部品表", "09_提出")
 
 
-def new(name, where=".", code=None):
-    """プロジェクトの骨組みを作る。code は文書番号の先頭に付ける英数字（例: UWD01）。"""
+def new(name, where=".", code=None, into=False):
+    """プロジェクトの骨組みを作る。code は文書番号の先頭に付ける英数字（例: UWD01）。
+
+    into=True は，既にあるフォルダ（リポジトリを先に作った場合など）へ足す．既にあるファイルは書き換えない．
+    """
     import datetime
     dst = Path(where).resolve() / name
-    if dst.exists() and any(dst.iterdir()):
-        print(f"{dst} は空でない。別の名前にする")
+    if dst.exists() and any(dst.iterdir()) and not into:
+        print(f"{dst} は空でない。別の名前にするか，--into を付けて既にあるフォルダへ足す")
         return 1
     pkg = "".join(c if c.isalnum() else "_" for c in name).lower()
     code = code or ("".join(c for c in name.upper() if c.isascii() and c.isalnum()) or "PRJ01")
@@ -153,6 +156,9 @@ def new(name, where=".", code=None):
         out.parent.mkdir(parents=True, exist_ok=True)
         if out.suffix == ".tmpl":
             out = out.with_suffix("")
+        if out.exists():
+            print(f"  既にあるので書き換えない: {out.relative_to(dst)}")
+            continue
         text = src.read_text(encoding="utf-8")
         for k, v in fill.items():
             text = text.replace(k, v)
@@ -183,7 +189,10 @@ def main(argv=None):
             i = a.index("--code")
             code = a[i + 1]
             del a[i:i + 2]
-        return new(a[1], a[2] if len(a) > 2 else ".", code)
+        into = "--into" in a
+        if into:
+            a.remove("--into")
+        return new(a[1], a[2] if len(a) > 2 else ".", code, into)
     print(__doc__)
     return 0 if cmd in ("help", "-h", "--help") else 1
 

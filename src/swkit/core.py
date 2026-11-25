@@ -349,6 +349,44 @@ class Sketch:
         self.rad.setdefault(str(r), []).append(seg)
         return seg
 
+    @timed("スケッチ 円弧を描く")
+    def arc(self, p0, p1, r, toward, concentric=None, center=None):
+        """p0 から p1 への円弧（劣弧）。半径 r は式につなぐ。
+
+        端点は，同じ位置にある線の端点（poly で free に指定した頂点など）と結合され，位置はその線の側で決まる。
+        toward: 円弧の中心がある側を示す点 (u, v)。弦のどちら側へ膨らむかを決める。
+        concentric: 中心を共有する円弧（先に描いた arc の戻り値）。板厚一定の曲がり板の内外面に使う。
+        center: 中心の位置を式で決める場合の (u, v)。None の成分は決めない。
+        端点 2つと半径で形が決まるので，その場合は concentric も center も要らない。
+        """
+        (u0, v0), (u1, v1) = [(self.val(a), self.val(b)) for a, b in (p0, p1)]
+        rr = self.val(r)
+        mu, mv = (u0 + u1) / 2, (v0 + v1) / 2
+        half = math.hypot(u1 - u0, v1 - v0) / 2
+        if half >= rr or _is0(half):
+            raise ValueError(f"円弧を描けない: 弦 {2 * half:.3f} mm に対して半径 {rr:.3f} mm")
+        nu, nv = -(v1 - v0) / (2 * half), (u1 - u0) / (2 * half)       # 弦に垂直な単位ベクトル
+        if (self.val(toward[0]) - mu) * nu + (self.val(toward[1]) - mv) * nv < 0:
+            nu, nv = -nu, -nv
+        h = math.sqrt(rr * rr - half * half)
+        cu, cv = mu + h * nu, mv + h * nv                              # 中心
+        qu, qv = cu - rr * nu, cv - rr * nv                            # 弧の中点（中心の反対側）
+        (x1, y1), (x2, y2), (xm, ym) = self._xy(u0, v0), self._xy(u1, v1), self._xy(qu, qv)
+        seg = self.sm.Create3PointArc(x1, y1, 0, x2, y2, 0, xm, ym, 0)
+        if seg is None:
+            raise RuntimeError(f"円弧を作れない: {p0} - {p1}")
+        self.segs.append(seg)
+        if concentric is not None:
+            self._rel("sgCONCENTRIC", seg, concentric)
+        if center is not None:
+            c = seg.GetCenterPoint2
+            if center[0] is not None:
+                self._reg(0, center[0], "pt", c, cv)
+            if center[1] is not None:
+                self._reg(1, center[1], "pt", c, cu)
+        self.rad.setdefault(str(r), []).append(seg)
+        return seg
+
     def point(self, u, v):
         """位置決め用の点（レイアウトで構成部品を合致させる相手）。"""
         x, y = self._xy(self.val(u), self.val(v))
@@ -653,6 +691,24 @@ class Doc:
         e, w = _byref_int(), _byref_int()
         return self.ext.SaveAs(str(path), 0, 1, NOTHING, e, w)
 
+    def section(self, base="front", on=True, reverse=False):
+        """基準平面 base（front / top / right）で切った断面表示にする。on=False で元に戻す。
+
+        内部が外から見えない組立品の画像を書き出すときに使う。モデルは変更しない。
+        """
+        mvm = self.doc.ModelViewManager
+        if not on:
+            M(mvm, "RemoveSectionView")
+            return True
+        data = call0(mvm, "CreateSectionViewData")
+        data.FirstPlane = self.planes()[base]
+        data.FirstReverseDirection = bool(reverse)
+        data.FirstOffset = 0.0
+        ok = bool(M(mvm, "CreateSectionView", data))
+        if not ok:
+            self.warn(f"断面表示にできない: {base}")
+        return ok
+
     def planes(self):
         """正面・平面・右側面（言語に依らず先頭 3 つの参照平面）。1 回探したら覚えておく。"""
         if self._planes is None:
@@ -844,7 +900,12 @@ class Part(Doc):
         self.doc.SetMaterialPropertyName2("", db, name)
 
     def set_density(self, rho):
-        """密度 kg/m3 を設定する．"""
+        """密度 kg/m3 を設定する．
+
+        テンプレートに材料（「未指定」など）が割り当ててあると，部品単体では設定した密度で計算されるのに，
+        アセンブリの質量にはその材料の密度が使われる．先に材料の割り当てを外す．
+        """
+        self.doc.SetMaterialPropertyName2("", "", "")
         self.ext.SetUserPreferenceDouble(7, 0, float(rho))   # swMaterialPropertyDensity
 
     def set_color(self, rgb, transparency=0.0):
@@ -1204,6 +1265,45 @@ class Asm(Doc):
             raise RuntimeError(f"構成部品の円形パターンに失敗: {name}")
         f.Name = name
         return f
+
+    @timed("構成部品パターン")
+    def linear(self, comp, n, pitch, name):
+        """構成部品を中心軸（X）の + 方向へピッチ pitch で n 個に並べる（構成部品の直線パターン）。
+
+        積層した同じ部品（座金，スペーサ，圧電素子など）に使う。ピッチは式につなぐ。
+        向きは API の既定に任せず，並んだ構成部品の位置で確かめる。
+        """
+        ax = self.axis_x()
+        root = M(self.doc.ConfigurationManager.ActiveConfiguration, "GetRootComponent3", True)
+
+        def xs():
+            return {c.Name2: c.Transform2.ArrayData[9] for c in (call0(root, "GetChildren") or ())}
+        before = xs()
+        x0 = before[comp.Name2]
+        for flip in (False, True):
+            self.doc.ClearSelection2(True)
+            ax.Select2(False, 2)
+            M(comp, "Select4", True, self._mark(self.doc.SelectionManager, 1), False)
+            f = M(self.doc.FeatureManager, "FeatureLinearPattern5", int(n), self.val(pitch) * MM, 1, 0.0,
+                  flip, False, "NULL", "NULL", False, False, False, False, False, False, False, False,
+                  False, False, 0.0, 0.0, False, False)
+            self.doc.ClearSelection2(True)
+            if f is None:
+                continue
+            new = [x for k, x in xs().items() if k not in before]
+            if len(new) == int(n) - 1 and all(x > x0 for x in new):
+                f.Name = name
+                dd = call0(f, "GetFirstDisplayDimension")
+                while dd is not None:                  # 個数の寸法もあるので，値がピッチに等しい寸法を選ぶ
+                    dim = M(dd, "GetDimension2", 0)
+                    if abs(dim.SystemValue - self.val(pitch) * MM) < 1e-9 and abs(dim.SystemValue - int(n)) > 1e-9:
+                        self.link(dim, pitch)
+                        break
+                    dd = M(f, "GetNextDisplayDimension", dd)
+                return f
+            f.Select2(False, 0)                        # − 方向へ並んだので向きを変えてやり直す
+            M(self.doc, "EditDelete")
+        raise RuntimeError(f"構成部品の直線パターンに失敗: {name}")
 
     @timed("拘束状態の確認")
     def unconstrained(self):
