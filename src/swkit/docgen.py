@@ -145,14 +145,22 @@ def _para(doc, text="", size=BODY_PT, bold=False, align=None, name=MINCHO, style
 
 
 def _runs(p, text, size=BODY_PT, bold=False, name=MINCHO):
-    """`コード` は等幅に、ほかはそのまま。"""
+    """`コード` は等幅に、$式$ は Word の数式に、ほかはそのまま。"""
     for i, part in enumerate(re.split(r"`([^`]*)`", text)):
         if not part:
             continue
-        r = p.add_run(part)
-        _font(r, size, bold, name)
         if i % 2:
+            r = p.add_run(part)
+            _font(r, size, bold, name)
             r.font.name = "Consolas"
+            continue
+        for k, seg in enumerate(re.split(r"\$([^$]+)\$", part)):
+            if not seg:
+                continue
+            if k % 2:
+                p._element.append(_omml(seg))
+            else:
+                _font(p.add_run(seg), size, bold, name)
 
 
 def _field(p, code):
@@ -177,8 +185,15 @@ GREEK = {"theta": "θ", "phi": "φ", "psi": "ψ", "rho": "ρ", "sigma": "σ", "p
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 
 
+FUNCS = ("log", "ln", "exp", "sin", "cos", "tan", "max", "min", "sqrt")
+
+
 def _omml(tex):
-    """式の原稿を Word の数式に直す。使える書き方: \\mathrm{sin}（立体）、\\overline{BG}（上線）、\\theta などのギリシャ文字、\\,（空白）。"""
+    """式の原稿を Word の数式に直す。
+
+    使える書き方: \\mathrm{sin}（立体）、\\overline{BG}（上線）、\\theta などのギリシャ文字、\\log などの関数名（立体）、
+    x_{ab} と x_0（下付き）、x^{2} と x^2（上付き）、\\,（空白）。
+    """
     def el(tag, *kids, **attr):
         e = OxmlElement(f"m:{tag}")
         for k, v in attr.items():
@@ -198,19 +213,27 @@ def _omml(tex):
         return r
 
     tex = re.sub(r"\\([A-Za-z]+)", lambda m: GREEK.get(m.group(1), m.group(0)), tex).replace("\\,", " ")
+    tok = re.compile(r"\\mathrm\{([^}]*)\}|\\overline\{([^}]*)\}|\\(" + "|".join(FUNCS) + r")(?![A-Za-z])|([_^])(?:\{([^}]*)\}|([A-Za-z0-9]+|.))|(\d+(?:\.\d+)?|[A-Za-z]|\s+|.)")
+    atoms = []
+    for m in tok.finditer(tex):
+        if m.group(1) is not None:
+            atoms.append(run(m.group(1), upright=True))
+        elif m.group(2) is not None:
+            atoms.append(el("bar", el("barPr", el("pos", val="top")), el("e", run(m.group(2)))))
+        elif m.group(3) is not None:
+            atoms.append(run(m.group(3), upright=True))
+        elif m.group(4) is not None:                     # 直前の要素に添字を付ける
+            script = m.group(5) if m.group(5) is not None else m.group(6)
+            upright = bool(re.fullmatch(r"\d+(\.\d+)?", script)) or len(script) > 1
+            base = atoms.pop() if atoms else run("")
+            kind, pos = ("sSub", "sub") if m.group(4) == "_" else ("sSup", "sup")
+            atoms.append(el(kind, el("e", base), el(pos, run(script, upright=upright))))
+        else:
+            text = m.group(7)
+            atoms.append(run(text, upright=bool(re.fullmatch(r"\d+(\.\d+)?", text))))
     math = el("oMath")
-    for part in re.split(r"(\\mathrm\{[^}]*\}|\\overline\{[^}]*\})", tex):
-        if not part:
-            continue
-        m = re.fullmatch(r"\\mathrm\{([^}]*)\}", part)
-        if m:
-            math.append(run(m.group(1), upright=True))
-            continue
-        m = re.fullmatch(r"\\overline\{([^}]*)\}", part)
-        if m:
-            math.append(el("bar", el("barPr", el("pos", val="top")), el("e", run(m.group(1)))))
-            continue
-        math.append(run(part))
+    for a in atoms:
+        math.append(a)
     return math
 
 
@@ -223,6 +246,13 @@ def _table(doc, rows, widths=None, header=True, size=9.5):
             return sum(2 if ord(c) > 0x2E7F else 1 for c in str(x))
         need = [min(max(w(r[j]) for r in rows), 44) + 3 for j in range(len(rows[0]))]
         widths = [166 * n / sum(need) for n in need]
+        # 短い記号の列（番号、単位など）が途中で折り返さない最小幅を確保し、残りをほかの列で分ける
+        floor = [min(w(max((str(r[j]) for r in rows), key=w)) * 1.9 + 5, 18) for j in range(len(rows[0]))]
+        short = [j for j in range(len(widths)) if widths[j] < floor[j]]
+        if short and len(short) < len(widths):
+            rest = 166 - sum(floor[j] for j in short)
+            tot = sum(widths[j] for j in range(len(widths)) if j not in short)
+            widths = [floor[j] if j in short else widths[j] * rest / tot for j in range(len(widths))]
     t.autofit = False
     t.alignment = WD_TABLE_ALIGNMENT.CENTER
     for i, row in enumerate(rows):
