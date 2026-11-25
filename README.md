@@ -1,112 +1,88 @@
 # swkit
 
-SOLIDWORKS を Python（COM）から操作して、**人が後から開いて直せるモデル**を作るためのライブラリです。
-特定の製品に依りません。設計ごとのコードは、設計パラメータのモジュールと `Project` の派生クラスだけを書きます。
+SOLIDWORKS の設計を自動化する Python ライブラリ
 
-## 何をしてくれるか
+設計者が後から開いて直せる 3次元モデルと，顧客へ提出できる設計文書を，同じ設計値から生成する．
 
-| モジュール | 内容 |
+![swkit で生成した水中ドローンの組立モデル](docs/img/example_assembly.png)
+
+上の組立モデルは [ai_assisted_submarine](https://github.com/waarrk/ai_assisted_submarine) で，設計値と形状の記述から全部品を生成したものである．
+
+## 特徴
+
+| 項目 | 内容 |
 | --- | --- |
-| `swkit.core` | 完全定義スケッチ（拘束・中心線の対称・等しい値・原点基準の寸法）、関係式、フィーチャ（押し出し・回転・カット・フィレット・面取り・ミラー・円形/直線パターン・板金・ケーブルのスイープ）、JIS の穴ウィザード、エンティティ変換とオフセット、アセンブリの合致、処理別の時間計測 |
-| `swkit.project` | 材料・プロパティの設定、基準平面への合致での配置、質量集計、アセンブリから加工部品へ反映する共締め穴、干渉・拘束状態の確認、画像・STEP の書き出し、部品のキャッシュ |
-| `swkit.vendor` | メーカー配布の 3D データ（STEP / IGES / SLDPRT）の取り込みと向きそろえ |
-| `swkit.inspect_part` | 部品のフィーチャ構成・スケッチの定義状態・関係式の一覧（点検用） |
-| `swkit.rapid` | MISUMI RAPiD Design から型番指定で部品モデルを取り込む（画面操作） |
-| `swkit.docgen` | 原稿（Markdown）から顧客へ出せる体裁の Word・PDF を作る。表紙・改訂履歴・目次・図表番号・数式・用語集、文書管理台帳との照合 |
-| `swkit.audit` | 使われていない基準平面と無駄なスケッチの点検 |
-| `swkit.cli` | `swkit doctor / setup / new / skill`（導入と点検、プロジェクトの骨組み） |
-| `swkit.config` | PC ごとの設定（SOLIDWORKS の版、テンプレート） |
+| 直せるモデル | 完全定義のスケッチ，名前付きの設計変数と関係式，加工工程ごとのフィーチャ |
+| 規格に沿う形状 | JIS の穴ウィザード，フィレット，面取り，ミラー，円形・直線パターン，板金 |
+| 組立からの設計 | レイアウトスケッチ，基準平面への合致，組立状態で定義して各部品へ反映する共締め穴 |
+| 実物の購入品 | 製造元の配布データの取り込み，MISUMI RAPiD Design からの型番指定の取り込み |
+| 確認の自動化 | 拘束状態，干渉，質量と重心，使われていない基準平面とスケッチの点検 |
+| 正式文書 | 原稿から Word と PDF を生成．表紙，改訂履歴，目次，図表番号，数式，用語集，文書管理台帳 |
+| 導入 | コマンド 1つで設定と点検．Claude Code 用の設計者スキルを同梱 |
 
-モデルの作り方の決まりは [src/swkit/templates/skill/MODELING_RULES.md](src/swkit/templates/skill/MODELING_RULES.md) にあります。
+## 導入
 
-## 必要なもの
+Windows，SOLIDWORKS，Python 3.10 以上が必要である．SOLIDWORKS 2024 で動作を確認した．
 
-- Windows、SOLIDWORKS（2024 で確認）
-- Python 3.10 以上、pywin32
-
-## 導入（どの PC でも同じ手順）
-
-```
-git clone git@github.com:waarrk/swkit.git
+```text
+git clone https://github.com/waarrk/swkit.git
 python -m venv .venv
 .venv\Scripts\pip install -e swkit[rapid,doc]
 .venv\Scripts\swkit setup
 ```
 
-`swkit setup` が行うこと:
+`swkit setup` は，SOLIDWORKS の版とテンプレートを調べて設定ファイルを作り，設計者スキルを入れ，環境を点検する．詳細は [導入](docs/01_導入.md) に示す．
 
-1. 入っている SOLIDWORKS の版とテンプレートを調べて、PC ごとの設定 `%USERPROFILE%\.swkit.json` を作る
-2. 設計者スキル `swkit-designer` を `%USERPROFILE%\.claude\skills\` に入れる
-3. `swkit doctor` で環境を点検する（SOLIDWORKS、テンプレート、pywin32、RAPiD Design、スキル）
+## 最初の設計
 
-設計者スキルは、Claude Code が SOLIDWORKS の設計作業をするときに読む手順書です。完全定義スケッチ、加工工程ごとのフィーチャ、
-フィレット・穴ウィザード・パターンの使い方、アセンブリからの設計、購入品の実データと在庫確認、部品表、設計レビューなど、
-実際の設計で設計者から受けた指摘をまとめてあります。これを入れた PC では、同じ決まりで設計が始まります。
-
-## 設計を始める
-
-```
-.venv\Scripts\swkit new <プロジェクト名>
-cd <プロジェクト名>
-python src\<名前>uild.py
+```text
+.venv\Scripts\swkit new 試作治具 --code JIG01
+cd 試作治具
+..\.venv\Scripts\python src\試作治具\build.py
+..\.venv\Scripts\python -m swkit.docgen doc\03_設計\JIG01-DDS-001_詳細設計書.md
 ```
 
-`swkit new` は、設計パラメータ（`analysis/params.py`）、生成スクリプトの見本（台板とブロックを共締めする最小の例）、
-プロジェクトの決まり（`CLAUDE.md`）、ISO 9001 の設計・開発の段階に沿った文書フォルダ（`doc/00_管理` 〜 `09_提出`）、
-文書管理台帳、詳細設計書の原稿のひな形を作ります。見本を自分の設計に書き換えて使います。
+1行目で設計プロジェクトの骨組みができる．3行目で見本の部品 2点と組立モデルを生成し，4行目で詳細設計書のひな形を Word と PDF にする．
 
-正式文書は `python -m swkit.docgen doc_設計\<文書番号>_詳細設計書.md` で Word と PDF になります。
-
-## 設定
-
-設定は `swkit setup` が作ります。手で直すときは `%USERPROFILE%\.swkit.json` を編集します（環境変数 `SWKIT_PROGID` などでも上書きできます）。
-テンプレートを空にすると、SOLIDWORKS の既定テンプレートを使います。
-
-```json
-{
-  "progid": "SldWorks.Application.32",
-  "part_template": "D:/templates/部品.prtdot",
-  "asm_template": "D:/templates/アセンブリ.asmdot"
-}
-```
-
-## 使い方
-
-設計値を名前付きの変数に置き、スケッチの座標と寸法を変数名の式で書きます。
-寸法は SOLIDWORKS のグローバル変数と関係式につながるので、生成後に変数を変えれば形が追従します。
+形状は次のように書く．寸法は設計変数の名前の式で与え，SOLIDWORKS の関係式として残る．
 
 ```python
 import types
 from swkit import SW
 
-P = types.SimpleNamespace(W=120.0, H=80.0, T=10.0, RIM=15.0)   # 設計パラメータ
+P = types.SimpleNamespace(W=120.0, H=80.0, T=10.0, RIM=15.0)
 sw = SW(P)
 try:
     p = sw.new_part()
     s = p.sketch("front")
-    s.rect("-W / 2", "W / 2", "-H / 2", "H / 2")               # 中心線に対称、全幅の寸法 1 本ずつ
+    s.rect("-W / 2", "W / 2", "-H / 2", "H / 2")
     p.extrude_mid("T", "板")
     s = p.sketch("front")
     edges = s.convert([(0, "H / 2", "T / 2"), ("W / 2", 0, "T / 2"),
-                       (0, "-H / 2", "T / 2"), ("-W / 2", 0, "T / 2")], construction=True)   # エンティティ変換
-    s.offset(edges, "RIM", toward=(0, 0))                      # 外形から一定幅の内側輪郭
+                       (0, "-H / 2", "T / 2"), ("-W / 2", 0, "T / 2")], construction=True)
+    s.offset(edges, "RIM", toward=(0, 0))
     p.cut_through("窓")
     p.save_as("plate.SLDPRT")
 finally:
     sw.restore()
 ```
 
-アセンブリから設計する流れ（レイアウトスケッチ → 部品とサブアセンブリ → 基準平面への合致 →
-アセンブリの穴フィーチャを加工部品へ反映 → 干渉・拘束の確認と書き出し）は `swkit.Project.build` にあります。
-`Project` を継承して、部品を作るメソッドとユニットを組むメソッドを書きます。
+## 文書
 
-```
-python examples/plate_with_offset_window.py   # 動作確認用の最小の例
-python -m swkit.inspect_part <部品.SLDPRT>     # 出来上がった部品の点検
-```
+| 文書 | 内容 |
+| --- | --- |
+| [導入](docs/01_導入.md) | インストール，設定，環境の点検 |
+| [設計の進め方](docs/02_設計の進め方.md) | プロジェクトの構成，設計値，組立からの設計の手順 |
+| [モデルの書き方](docs/03_モデルの書き方.md) | スケッチ，フィーチャ，組立，共締め穴の書き方 |
+| [購入品](docs/04_購入品.md) | 配布データの取り込み，RAPiD Design，既存の部品の登録 |
+| [正式文書](docs/05_正式文書.md) | 原稿の書式，文書番号，Word と PDF の生成 |
+| [点検と速度](docs/06_点検と速度.md) | モデルの点検，所要時間の計測，部品とユニットの使い回し |
+| [困ったとき](docs/07_困ったとき.md) | 症状ごとの原因と対処 |
+| [API 一覧](docs/api.md) | 全モジュールの関数とメソッド |
+| [モデリング規約](src/swkit/templates/skill/MODELING_RULES.md) | 生成するモデルが従う決まり |
 
 ## 注意
 
-- SOLIDWORKS を操作するスクリプトを 2 本同時に走らせないでください。
-- 実行中は表示更新と視点アニメーションを止めます。`SW.SHOW = True` にすると、作る過程を画面で見られます（遅くなります）。
-- 終了時に `sw.restore()` を呼ぶと、変えた SOLIDWORKS の設定を元に戻します。
+- SOLIDWORKS を操作するスクリプトを 2本同時に実行しない．
+- 生成先のフォルダにある文書は上書きする．手で直した内容は設計値か生成スクリプトへ反映する．
+- 生成中は画面更新と視点のアニメーションを止める．終了時に `sw.restore()` で元へ戻す．

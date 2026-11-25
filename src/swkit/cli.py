@@ -53,10 +53,12 @@ def find_templates(exe):
 
 
 def load_config():
+    """PC ごとの設定ファイルを読む．"""
     return json.loads(CONFIG.read_text(encoding="utf-8")) if CONFIG.exists() else {}
 
 
 def doctor():
+    """環境を点検して結果を表示する．問題が無ければ 0 を返す．"""
     ok = True
 
     def line(good, text, hint=""):
@@ -100,6 +102,7 @@ def doctor():
 
 
 def install_skill():
+    """設計者スキルを利用者のスキルフォルダへ入れる．"""
     SKILL_DIR.mkdir(parents=True, exist_ok=True)
     shutil.copy2(TEMPLATES / "skill" / "SKILL.md", SKILL_DIR / "SKILL.md")
     shutil.copy2(TEMPLATES / "skill" / "MODELING_RULES.md", SKILL_DIR / "MODELING_RULES.md")
@@ -107,6 +110,7 @@ def install_skill():
 
 
 def setup():
+    """設定ファイルを作り，設計者スキルを入れ，環境を点検する．"""
     sw = installed_solidworks()
     if not sw:
         print("SOLIDWORKS が見つからない。インストールしてからやり直す")
@@ -163,6 +167,7 @@ def new(name, where=".", code=None):
 
 
 def main(argv=None):
+    """コマンドを解釈して実行する．"""
     a = list(sys.argv[1:] if argv is None else argv)
     cmd = a[0] if a else "help"
     if cmd == "doctor":

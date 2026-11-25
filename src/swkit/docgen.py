@@ -68,12 +68,14 @@ class Register:
     """文書管理台帳。文書番号は台帳に登録してから使う。発行（docx・PDF の生成）のたびに版・発行日・提出物を書き戻す。"""
 
     def __init__(self, path: Path):
+        """文書管理台帳を読む．"""
         self.path = path
         with open(path, encoding="utf-8-sig", newline="") as f:
             self.rows = list(csv.DictReader(f))
 
     @classmethod
     def find(cls, src: Path):
+        """原稿の上位フォルダから文書管理台帳を探す．無ければ None．"""
         for up in src.parents:
             for d in up.glob("00_*"):
                 if (d / REGISTER).exists():
@@ -81,9 +83,11 @@ class Register:
         return None
 
     def row(self, number):
+        """文書番号の行を返す．"""
         return next((r for r in self.rows if r["文書番号"] == number), None)
 
     def check(self, meta, src):
+        """原稿の文書番号・名称・版を台帳と照合し，合わなければ中止する．"""
         r = self.row(meta["number"])
         if r is None:
             raise SystemExit(f"{src.name}: 文書番号 {meta['number']} が {self.path.name} に無い。先に台帳へ登録する")
@@ -94,6 +98,7 @@ class Register:
             raise SystemExit(f"{src.name}: 改訂履歴の最後の版（{revs[-1] if revs else 'なし'}）が文書の版 {meta['version']} と違う")
 
     def issued(self, meta, src, out):
+        """発行した版・発行日・状態・提出物の場所を台帳に書き戻す．"""
         r = self.row(meta["number"])
         base = self.path.parent.parent
         r.update({"版": meta["version"], "発行日": meta["date"], "状態": "発行" if meta.get("approver") else "審査前",
@@ -105,6 +110,7 @@ class Register:
 
 
 def parse(path: Path):
+    """原稿を文書情報と本文に分ける．"""
     s = path.read_text(encoding="utf-8-sig")
     m = re.match(r"\+\+\+\n(.*?)\n\+\+\+\n", s, re.S)
     if not m:
@@ -246,6 +252,7 @@ def _heading(doc, text, level):
 
 
 def build(src: Path):
+    """原稿から Word 文書を作り，保存先のパスを返す．文書管理台帳があれば照合と更新を行う．"""
     meta, body = parse(src)
     doc = Document()
     sec = doc.sections[0]
@@ -410,6 +417,7 @@ def to_pdf(docx: Path):
 
 
 def main():
+    """コマンドラインから Word と PDF を生成する．"""
     for a in sys.argv[1:]:
         out = build(Path(a).resolve())
         pdf, pages = to_pdf(out)

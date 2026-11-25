@@ -17,6 +17,7 @@ from .core import SW, call0, M
 
 
 def audit(sw, path):
+    """1つの文書の基準平面とスケッチを数え，使われていないものを返す．"""
     doc = sw.open(path)
     planes, sketches, dead_planes, empty, unused = 0, 0, [], [], []
     f, n_default = call0(doc, "FirstFeature"), 0
@@ -46,6 +47,7 @@ def audit(sw, path):
 
 
 def main():
+    """コマンドラインから点検を実行する．"""
     targets = []
     for a in sys.argv[1:]:
         p = Path(a)

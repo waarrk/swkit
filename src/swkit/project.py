@@ -96,9 +96,11 @@ class Project:
 
     # ------------------------------------------------------------ 文書
     def new_part(self):
+        """新しい部品を作り，Part を返す．"""
         return self.sw.new_part()
 
     def new_asm(self, path):
+        """新しいアセンブリを作って path に保存し，Asm を返す．"""
         a = self.sw.new_asm()
         a.labels = dict(self.labels)
         a.save_as(path)

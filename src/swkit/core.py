@@ -67,6 +67,7 @@ class Profile:
 
     @classmethod
     def timed(cls, label):
+        """処理の所要時間を種類ごとに積算するデコレータ．"""
         def deco(fn):
             @functools.wraps(fn)
             def wrapper(*a, **k):
@@ -87,6 +88,7 @@ class Profile:
 
     @classmethod
     def report(cls, total=None):
+        """処理の種類ごとの回数と所要時間を表示し，辞書で返す．"""
         rows = sorted(cls.data.items(), key=lambda kv: -kv[1][1])
         known = sum(v[1] for _, v in rows)
         print(f"{'処理':<26}{'回数':>7}{'秒':>9}{'1 回 ms':>10}")
@@ -105,6 +107,7 @@ class SW:
     SHOW = False
 
     def __init__(self, params=None):
+        """SOLIDWORKS に接続し，生成中だけ画面更新と視点のアニメーションを止める．params は設計値のモジュール．"""
         self.params = params
         self.app = wc.Dispatch(PROGID)
         self.app.Visible = True
@@ -130,6 +133,7 @@ class SW:
         self.app.SetUserPreferenceStringValue(9, self.asm_tpl)
 
     def restore(self):
+        """変更した SOLIDWORKS の設定を元に戻す．終了時に必ず呼ぶ．"""
         self.app.CommandInProgress = False
         self.app.SetUserPreferenceToggle(10, self._input_dim)
         self.app.SetUserPreferenceToggle(111, self._prefs["toggle"])
@@ -168,14 +172,17 @@ class SW:
     @timed("新規部品")
     def new_part(self):
         # 文書は表示したまま作る。非表示（DocumentVisible False）だとスケッチを開けない
+        """新しい部品を作り，Part を返す．"""
         return Part(self, self.app.NewDocument(self.part_tpl, 0, 0, 0), self.params)
 
     @timed("新規アセンブリ")
     def new_asm(self):
+        """新しいアセンブリを作り，Asm を返す．"""
         return Asm(self, self.app.NewDocument(self.asm_tpl, 0, 0, 0), self.params)
 
     @timed("文書を開く")
     def open(self, path, kind=None):
+        """部品またはアセンブリを開き，文書オブジェクトを返す．"""
         path = str(path)
         if kind is None:
             kind = ASM if path.lower().endswith(".sldasm") else PART
@@ -186,6 +193,7 @@ class SW:
         return doc
 
     def activate(self, doc):
+        """文書を前面にする．寸法へ関係式を付ける前に必要となる．"""
         e = _byref_int()
         self.app.ActivateDoc3(call0(doc, "GetTitle"), False, 2, e)
 
@@ -224,6 +232,7 @@ class Sketch:
 
     @timed("スケッチ開始")
     def __init__(self, owner, base, feature, revolve=False, edit=False):
+        """基準平面にスケッチを開く．Part.sketch と Asm.sketch から呼ばれる．"""
         self.o, self.doc, self.revolve = owner, owner.doc, revolve
         self.iu, self.iv, _ = AXES[base]
         doc = self.doc
@@ -258,6 +267,7 @@ class Sketch:
 
     # ---------------------------------------------------------- 座標
     def val(self, e):
+        """式を設計値で評価して数値 mm を返す．"""
         return self.o.val(e)
 
     def _xy(self, u, v):
@@ -311,10 +321,12 @@ class Sketch:
         return lines
 
     def rect(self, u0, u1, v0, v1):
+        """辺が軸に平行な長方形．4辺の位置を式で与える．"""
         return self.poly([(u0, v0), (u1, v0), (u1, v1), (u0, v1)])
 
     @timed("スケッチ 円を描く")
     def circle(self, u, v, d):
+        """中心 (u, v)，直径 d の円．"""
         x, y = self._xy(self.val(u), self.val(v))
         seg = self.sm.CreateCircleByRadius(x, y, 0, self.val(d) / 2 * MM)
         c = seg.GetCenterPoint2
@@ -501,6 +513,7 @@ class Sketch:
 
     @timed("スケッチ 定義の整理")
     def define(self):
+        """拘束と寸法を付けて完全定義にする．フィーチャを作る操作から自動で呼ばれる．"""
         origin = self.o.origin
         self._cl = {}
         self._merge_ends()
@@ -564,6 +577,7 @@ class Sketch:
 
 class Doc:
     def __init__(self, sw: SW, doc, params=None):
+        """文書を包み，関係式の管理を始める．"""
         if doc is None:
             raise RuntimeError("文書を作成できない")
         self.sw, self.doc = sw, doc
@@ -588,6 +602,7 @@ class Doc:
         self.labels = {}              # 基準平面の式 -> 分かりやすい名前
 
     def warn(self, msg):
+        """警告を記録して表示する．"""
         self.warnings.append(msg)
         print("      !", msg)
 
@@ -601,6 +616,7 @@ class Doc:
 
     @timed("保存")
     def save_as(self, path):
+        """関係式を評価してから名前を付けて保存する．"""
         self.solve_equations()
         SW.quiet(self.doc, False)
         path = Path(path)
@@ -614,6 +630,7 @@ class Doc:
 
     @timed("保存")
     def save(self):
+        """関係式を評価してから上書き保存する．"""
         self.solve_equations()
         e, w = _byref_int(), _byref_int()
         if not self.doc.Save3(1, e, w):
@@ -621,15 +638,18 @@ class Doc:
 
     @timed("再構築")
     def rebuild(self):
+        """関係式を評価して再構築する．"""
         self.solve_equations()
         self.doc.ForceRebuild3(False)
 
     def set_prop(self, name, value):
+        """ユーザー定義プロパティを設定する．"""
         cpm = self.ext.CustomPropertyManager("")
         cpm.Add3(name, 30, str(value), 2)  # text, 既存は上書き
 
     @timed("書き出し")
     def export(self, path):
+        """STEP などの形式で書き出す．形式は拡張子で決まる．"""
         e, w = _byref_int(), _byref_int()
         return self.ext.SaveAs(str(path), 0, 1, NOTHING, e, w)
 
@@ -645,6 +665,7 @@ class Doc:
         return self._planes
 
     def plane_names(self):
+        """正面・平面・右側面の名前を返す．"""
         return {k: f.Name for k, f in self.planes().items()}
 
     @timed("基準平面")
@@ -693,6 +714,7 @@ class Doc:
         return dict(zip(("front", "top", "right"), out))
 
     def title(self):
+        """文書の題名を返す．"""
         return call0(self.doc, "GetTitle")
 
     @timed("質量特性")
@@ -705,6 +727,7 @@ class Doc:
 
     # ------------------------------------------------------------ 式
     def val(self, e):
+        """式を設計値で評価して数値 mm を返す．"""
         if isinstance(e, (int, float)):
             return float(e)
         return float(eval(e, {"__builtins__": {}}, vars(self.params)))
@@ -812,16 +835,20 @@ class Part(Doc):
     """加工工程ごとにフィーチャを分けて作る部品。寸法は設計パラメータの関係式で駆動する。"""
 
     def __init__(self, sw, doc, params=None):
+        """部品の文書を包む．"""
         super().__init__(sw, doc, params)
         self._axis = None
 
     def set_material(self, name, db="SOLIDWORKS Materials"):
+        """SOLIDWORKS の材料を割り当てる．"""
         self.doc.SetMaterialPropertyName2("", db, name)
 
     def set_density(self, rho):
+        """密度 kg/m3 を設定する．"""
         self.ext.SetUserPreferenceDouble(7, 0, float(rho))   # swMaterialPropertyDensity
 
     def set_color(self, rgb, transparency=0.0):
+        """色と透明度を設定する．"""
         r, g, b = rgb
         self.doc.MaterialPropertyValues = _dbl_array((r, g, b, 1, 1, 0.3, 0.3, transparency, 0))
 
@@ -1054,11 +1081,13 @@ class Asm(Doc):
     COINCIDENT, PARALLEL = 0, 3
 
     def __init__(self, sw, doc, params=None):
+        """アセンブリの文書を包む．"""
         super().__init__(sw, doc, params)
         self._pn = {}                      # 構成部品名 -> その文書の基準平面名
         self._axis = None
 
     def stem(self):
+        """拡張子を除いた文書名を返す．"""
         return Path(self.title()).stem
 
     @timed("構成部品の挿入")
@@ -1137,6 +1166,7 @@ class Asm(Doc):
         return self._s
 
     def keep_sketch(self, name):
+        """スケッチを閉じ，名前を付けてレイアウトスケッチとして残す．"""
         self._s.define()
         feat = M(self.doc, "FeatureByPositionReverse", 0)     # 開いているスケッチ（いちばん新しいフィーチャ）
         self.doc.SketchManager.InsertSketch(True)
