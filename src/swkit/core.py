@@ -982,6 +982,52 @@ class Part(Doc):
               False, MIDPLANE, 0, 1, cba, False, 0, 0.0001, 0.0001, 0.5, True, False, True, True)
         return self._done(f, name, "板金ベースフランジ")
 
+    def _face_at(self, base, w, at, from_pos=True):
+        """base に平行な面のうち、法線方向の位置 w、面内の点 at を通るものを選択する。追加選択にはしない。"""
+        iu, iv, iw = AXES[base]
+        sgn = 1.0 if from_pos else -1.0
+        o, d = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
+        o[iu], o[iv] = self.val(at[0]) * MM, self.val(at[1]) * MM
+        o[iw] = self.val(w) * MM + sgn * 0.002
+        d[iw] = -sgn
+        self.doc.ClearSelection2(True)
+        if not M(self.ext, "SelectByRay", o[0], o[1], o[2], d[0], d[1], d[2], 0.0002, 2, False, 0, 0):
+            raise RuntimeError(f"面が見つからない: {base} {w} {at}")
+        return M(self.doc.SelectionManager, "GetSelectedObject6", 1, -1)
+
+    def sketch_face(self, base, w, at=(0, 0), from_pos=True):
+        """部品の平らな面にスケッチを開く。base: 面の向き（front / top / right）、w: 法線方向の位置、at: 面内の 1 点。
+
+        基準平面ではなく面に描く必要があるフィーチャ（板金のスケッチ曲げ）に使う。座標の意味は sketch と同じ。
+        """
+        self._s = Sketch(self, base, self._face_at(base, w, at, from_pos))
+        self._s.face = (base, w, from_pos)
+        return self._s
+
+    @timed("板金")
+    def sketched_bend(self, angle, r, fixed, name, flip=False):
+        """板金の平らな面に描いた 1 本の線で板を折る（スケッチ曲げ）。平板を抜いてから曲げる工程をそのまま表す。
+
+        直前に sketch_face で面に曲げ線を 1 本描いておく。angle: 曲げ角 度（平らな状態からの角度）、r: 内 R、
+        fixed: 動かさない側の面内の点 (u, v)。flip=True で反対向きに折る。
+        """
+        base, w, from_pos = self._s.face
+        self._s.define()
+        iu, iv, iw = AXES[base]
+        sgn = 1.0 if from_pos else -1.0
+        o, d = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
+        o[iu], o[iv] = self.val(fixed[0]) * MM, self.val(fixed[1]) * MM
+        o[iw] = self.val(w) * MM + sgn * 0.002
+        d[iw] = -sgn
+        self.doc.ClearSelection2(True)
+        if not M(self.ext, "SelectByRay", o[0], o[1], o[2], d[0], d[1], d[2], 0.0002, 2, False, 0, 0):
+            raise RuntimeError(f"固定する面が見つからない: {name}")
+        fm = self.doc.FeatureManager
+        cba = call0(fm, "CreateCustomBendAllowance")
+        cba.KFactor = 0.5
+        f = M(fm, "InsertSheetMetal3dBend", math.radians(self.val(angle)), False, self.val(r) * MM, flip, 0, cba)
+        return self._done(f, name, "板金スケッチ曲げ")
+
     @timed("ケーブル")
     def cable(self, pts, d, name):
         """点列 pts（モデル座標 mm）を通る 3D スプラインに沿った丸断面のケーブル。ほかのボディとは結合しない。"""
