@@ -21,6 +21,8 @@ from .core import SW, M, Part, Profile, call0, timed
 
 I3 = ((1, 0, 0), (0, 1, 0), (0, 0, 1))
 FLIP_X = ((-1, 0, 0), (0, 1, 0), (0, 0, -1))        # Y 軸まわり 180°
+X_DOWN = ((0, -1, 0), (1, 0, 0), (0, 0, 1))         # 部品の X 軸を下へ（上から入れるボルト）
+X_TO_NEG_Z = ((0, 0, -1), (0, 1, 0), (1, 0, 0))     # 部品の X 軸をアセンブリの −Z へ
 X_TO_Z = ((0, 0, 1), (0, 1, 0), (-1, 0, 0))         # 部品の X 軸をアセンブリの Z 軸へ
 X_TO_Y = ((0, 1, 0), (1, 0, 0), (0, 0, -1))         # 部品の X 軸を上へ、Y 軸を前へ
 X_TO_Z_Y_TO_X = ((0, 0, 1), (1, 0, 0), (0, 1, 0))   # 部品の X 軸を Z へ、Y 軸を X へ、Z 軸を上へ
@@ -151,6 +153,22 @@ class Project:
         if axis:
             part.axis_x()
         return self.finish(part, dst, mat, color, mass=mass, 出典=Path(src).name, **props)
+
+    def existing(self, path, rho=None):
+        """既にある部品ファイル（RAPiD Design で取り込んだ MISUMI 品など）を、作り直さずに既製品として登録する。
+
+        形状には手を加えない。rho を与えると密度だけ設定して保存する（配布モデルは材料が未設定のことがある）。
+        """
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"{path} が無い。swkit.rapid で取り込んでおく")
+        part = Part(self.sw, self.sw.open(path), self.P)
+        if rho:
+            part.set_density(rho)
+            part.save()
+        m, v, cg = part.mass()
+        self.parts[path.stem] = (path, m, v, cg)
+        return path.stem
 
     # ------------------------------------------------------------ 配置
     def record(self, name, rows, t, unit, comp=None):
