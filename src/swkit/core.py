@@ -709,6 +709,24 @@ class Doc:
             self.warn(f"断面表示にできない: {base}")
         return ok
 
+    def image(self, path, view=7):
+        """形だけの画像を書き出す（スケッチ・平面・軸・原点は隠す）。view: 7 = 等角、1 = 正面、5 = 上面、4 = 右側面。"""
+        self.sw.activate(self.doc)
+        SW.quiet(self.doc, False)
+        try:
+            self.sw.app.FrameState = 1                   # ウィンドウを最大化
+            self.ext.SetUserPreferenceToggle(198, 0, True)
+        except Exception:
+            pass
+        self.doc.ShowNamedView2("", view)
+        M(self.doc, "ViewZoomtofit2")
+        ok = self.export(path)
+        try:
+            self.ext.SetUserPreferenceToggle(198, 0, False)
+        except Exception:
+            pass
+        return ok
+
     def planes(self):
         """正面・平面・右側面（言語に依らず先頭 3 つの参照平面）。1 回探したら覚えておく。"""
         if self._planes is None:
@@ -1304,6 +1322,33 @@ class Asm(Doc):
             f.Select2(False, 0)                        # − 方向へ並んだので向きを変えてやり直す
             M(self.doc, "EditDelete")
         raise RuntimeError(f"構成部品の直線パターンに失敗: {name}")
+
+    def leaves(self):
+        """部品の構成部品をすべて返す（サブアセンブリの中も含む）。"""
+        root = M(self.doc.ConfigurationManager.ActiveConfiguration, "GetRootComponent3", True)
+        out = []
+
+        def walk(c):
+            kids = call0(c, "GetChildren") or ()
+            if not kids and c is not root:
+                out.append(c)
+            for k in kids:
+                walk(k)
+        walk(root)
+        return out
+
+    def show_only(self, keep=None):
+        """keep(名前) が真の部品だけを表示する。keep=None で全部を表示に戻す。組立の途中の状態を画像にするときに使う。
+
+        名前は「ユニット-1/部品-3」の形。表示の切り替えだけで、モデルは変更しない（保存しないこと）。
+        """
+        shown = 0
+        for c in self.leaves():
+            v = keep is None or bool(keep(c.Name2))
+            c.Visible = 1 if v else 0
+            shown += v
+        M(self.doc, "GraphicsRedraw2")
+        return shown
 
     @timed("拘束状態の確認")
     def unconstrained(self):

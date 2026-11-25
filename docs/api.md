@@ -71,6 +71,7 @@ SOLIDWORKS API(COM) の薄いラッパ。
 | `set_prop(name, value)` | ユーザー定義プロパティを設定する． |
 | `export(path)` | STEP などの形式で書き出す．形式は拡張子で決まる． |
 | `section(base='front', on=True, reverse=False)` | 基準平面 base（front / top / right）で切った断面表示にする。on=False で元に戻す。 |
+| `image(path, view=7)` | 形だけの画像を書き出す（スケッチ・平面・軸・原点は隠す）。view: 7 = 等角、1 = 正面、5 = 上面、4 = 右側面。 |
 | `planes()` | 正面・平面・右側面（言語に依らず先頭 3 つの参照平面）。1 回探したら覚えておく。 |
 | `plane_names()` | 正面・平面・右側面の名前を返す． |
 | `ref_plane(j, expr)` | 軸 j（0 = X, 1 = Y, 2 = Z）に垂直で、座標が expr の基準平面。0 なら既定の平面を返す。 |
@@ -123,6 +124,8 @@ SOLIDWORKS API(COM) の薄いラッパ。
 | `axis_x()` | X 軸（正面∩平面）の基準軸。構成部品の円形パターンの中心。 |
 | `circular(comp, n, name)` | 構成部品を中心軸まわりに等配 n 個（構成部品の円形パターン）。 |
 | `linear(comp, n, pitch, name)` | 構成部品を中心軸（X）の + 方向へピッチ pitch で n 個に並べる（構成部品の直線パターン）。 |
+| `leaves()` | 部品の構成部品をすべて返す（サブアセンブリの中も含む）。 |
+| `show_only(keep=None)` | keep(名前) が真の部品だけを表示する。keep=None で全部を表示に戻す。組立の途中の状態を画像にするときに使う。 |
 | `unconstrained()` | 完全に拘束されていない構成部品の名前。 |
 | `interference()` | 干渉している部品対の一覧 [(名前1, 名前2, 体積 mm3)]。 |
 
