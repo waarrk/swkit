@@ -12,6 +12,7 @@ dependencies = ["pywin32; sys_platform == 'win32'"]
 
 [project.optional-dependencies]
 rapid = ["pywinauto", "pillow"]       # MISUMI RAPiD Design からの取り込み（画面操作）
+doc = ["python-docx"]                 # 正式文書（Word・PDF）の生成。PDF は Word で書き出す
 
 [project.scripts]
 swkit = "swkit.cli:main"

@@ -5,25 +5,37 @@ SOLIDWORKS の設計プロジェクト。CAD は swkit（https://github.com/waar
 ## 最初に
 
 - 設計者スキル `swkit-designer` を読んでから作業する（`swkit setup` で入る。無ければ `swkit skill`）。
-  スキルが使えない環境では、swkit の `src/swkit/templates/skill/SKILL.md` と `MODELING_RULES.md` を読む。
 - `swkit doctor` で環境を確かめる。
+- 文章の規則は全体規約（`~/.claude/CLAUDE.md` と `~/.claude/guides/WRITING.md`）に従う。
 
 ## このプロジェクトの決まり
 
-- 設計値は `ANALYSIS/params.py` の 1 か所に置く。CAD と事前計算の両方がここから読む。数値をほかの場所に直書きしない。
-- 形と配置は `src/{{pkg}}/build.py` に書く。`CAD/` 配下は生成物で、手で直した内容は再生成で消える。
-- 作り直す: `python src/{{pkg}}/build.py`。結果（質量、干渉、拘束、画像）は `ANALYSIS/out/` と `Doc/IMAGES/` に出る。
-- 設計の判断と残る確認事項は `Doc/DESIGN_SHEET/` に、部品表は `Doc/PART_LIST/` に置く。
-- メーカー配布の 3D データは `CAD_SOURCE/vendor/` に置き、入手元を記録する。
+- 設計値は `analysis/params.py` の 1 か所に置く。CAD と事前計算の両方がここから読む。
+- 形と配置は `src/{{pkg}}/build.py` に書く。`cad/` 配下は生成物で、手で直した内容は再生成で消える。
+- 作り直す: `python src/{{pkg}}/build.py`。結果（質量、干渉、拘束）は `analysis/out/`、画像は `doc/03_設計/図/` に出る。
+- 文書番号は `doc/00_管理/文書管理台帳.csv` に登録してから使う。形式は `{{code}}-種別-連番`。
+- 顧客へ出す文書は原稿（Markdown）から `python -m swkit.docgen <原稿.md>` で Word と PDF を作り、`doc/09_提出/` に置く。
+  生成の前に日本語の機械検査（`lint_ja.py --strict`）で検出 0 件にする。
+- フォルダ名は小文字（`doc/` 配下は番号付きの日本語）。
 - SOLIDWORKS を操作するスクリプトを 2 本同時に走らせない。ユーザーが開いているほかの文書を閉じない。
 
 ## フォルダ
 
 ```
-ANALYSIS/        設計パラメータ、事前計算、計算結果（out/）
-CAD/             生成した部品・アセンブリ（00_既製品、01_<製品>/<ユニット>）
-CAD_SOURCE/      メーカー配布データ（取り込み元）
-Doc/             設計シート、部品表、画像
-QUOTE/           見積り
+analysis/        設計パラメータ、事前計算、計算結果（out/）
+cad/             生成した部品・アセンブリ（00_既製品、01_<製品>/<ユニット>）
+cad_source/      メーカー配布データ（取り込み元）
+doc/             文書と記録（ISO 9001 の設計・開発の段階ごと）
+  00_管理/         文書管理台帳、文書管理要領
+  01_計画/         設計開発計画書
+  02_要求/         要求仕様書（設計へのインプット）
+  03_設計/         詳細設計書、計算書、図（設計からのアウトプット）
+  04_審査/         設計審査記録
+  05_検証/         設計検証記録
+  06_妥当性確認/   妥当性確認の計画と記録
+  07_変更/         設計変更記録
+  08_購買/         部品表、見積・在庫の確認記録
+  09_提出/         発行した提出物（Word、PDF）
+quote/           見積りの取得
 src/{{pkg}}/     生成スクリプト
 ```

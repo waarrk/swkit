@@ -2,7 +2,7 @@
 
     swkit doctor            環境の点検（SOLIDWORKS、テンプレート、pywin32、RAPiD Design、設計者スキル）
     swkit setup             この PC 用の設定（~/.swkit.json）を作り、設計者スキルを入れる
-    swkit new <名前> [場所]  設計プロジェクトの骨組みを作る
+    swkit new <名前> [場所] [--code 文書番号の先頭]  設計プロジェクトの骨組みを作る
     swkit skill             設計者スキル（Claude Code 用）だけを入れ直す
 
 どの PC でも `pip install` のあと `swkit setup` を 1 回実行すれば、同じ決まりで設計を始められる。
@@ -126,14 +126,22 @@ def setup():
     return doctor()
 
 
-def new(name, where="."):
+DOC_DIRS = ("00_管理", "01_計画", "02_要求", "03_設計/計算書", "03_設計/図", "04_審査", "05_検証", "06_妥当性確認", "07_変更",
+            "08_購買/部品表", "09_提出")
+
+
+def new(name, where=".", code=None):
+    """プロジェクトの骨組みを作る。code は文書番号の先頭に付ける英数字（例: UWD01）。"""
+    import datetime
     dst = Path(where).resolve() / name
     if dst.exists() and any(dst.iterdir()):
         print(f"{dst} は空でない。別の名前にする")
         return 1
     pkg = "".join(c if c.isalnum() else "_" for c in name).lower()
+    code = code or ("".join(c for c in name.upper() if c.isascii() and c.isalnum()) or "PRJ01")
+    fill = {"{{name}}": name, "{{pkg}}": pkg, "{{code}}": code, "{{date}}": datetime.date.today().isoformat()}
     for src in (TEMPLATES / "project").rglob("*"):
-        rel = Path(str(src.relative_to(TEMPLATES / "project")).replace("__pkg__", pkg))
+        rel = Path(str(src.relative_to(TEMPLATES / "project")).replace("__pkg__", pkg).replace("__code__", code))
         out = dst / rel
         if src.is_dir():
             out.mkdir(parents=True, exist_ok=True)
@@ -141,11 +149,15 @@ def new(name, where="."):
         out.parent.mkdir(parents=True, exist_ok=True)
         if out.suffix == ".tmpl":
             out = out.with_suffix("")
-        out.write_text(src.read_text(encoding="utf-8").replace("{{name}}", name).replace("{{pkg}}", pkg), encoding="utf-8")
-    for d in ("CAD", "CAD_SOURCE/vendor", "Doc/DESIGN_SHEET", "Doc/PART_LIST", "QUOTE"):
+        text = src.read_text(encoding="utf-8")
+        for k, v in fill.items():
+            text = text.replace(k, v)
+        out.write_text(text, encoding="utf-8-sig" if out.suffix == ".csv" else "utf-8")
+    for d in ("cad", "cad_source/vendor", "quote") + tuple(f"doc/{x}" for x in DOC_DIRS):
         (dst / d).mkdir(parents=True, exist_ok=True)
-    print(f"プロジェクトを作った: {dst}")
-    print(f"  設計値: ANALYSIS/params.py    生成スクリプト: src/{pkg}/build.py    決まり: CLAUDE.md")
+    print(f"プロジェクトを作った: {dst}（文書番号の先頭: {code}）")
+    print(f"  設計値: analysis/params.py    生成スクリプト: src/{pkg}/build.py    決まり: CLAUDE.md")
+    print(f"  文書: doc/00_管理/文書管理台帳.csv に番号を登録し、python -m swkit.docgen <原稿.md> で Word と PDF を作る")
     print(f"  試す: cd {dst} && python src/{pkg}/build.py")
     return 0
 
@@ -161,7 +173,12 @@ def main(argv=None):
         install_skill()
         return 0
     if cmd == "new" and len(a) >= 2:
-        return new(a[1], a[2] if len(a) > 2 else ".")
+        code = None
+        if "--code" in a:
+            i = a.index("--code")
+            code = a[i + 1]
+            del a[i:i + 2]
+        return new(a[1], a[2] if len(a) > 2 else ".", code)
     print(__doc__)
     return 0 if cmd in ("help", "-h", "--help") else 1
 

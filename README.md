@@ -12,6 +12,8 @@ SOLIDWORKS を Python（COM）から操作して、**人が後から開いて直
 | `swkit.vendor` | メーカー配布の 3D データ（STEP / IGES / SLDPRT）の取り込みと向きそろえ |
 | `swkit.inspect_part` | 部品のフィーチャ構成・スケッチの定義状態・関係式の一覧（点検用） |
 | `swkit.rapid` | MISUMI RAPiD Design から型番指定で部品モデルを取り込む（画面操作） |
+| `swkit.docgen` | 原稿（Markdown）から顧客へ出せる体裁の Word・PDF を作る。表紙・改訂履歴・目次・図表番号・数式・用語集、文書管理台帳との照合 |
+| `swkit.audit` | 使われていない基準平面と無駄なスケッチの点検 |
 | `swkit.cli` | `swkit doctor / setup / new / skill`（導入と点検、プロジェクトの骨組み） |
 | `swkit.config` | PC ごとの設定（SOLIDWORKS の版、テンプレート） |
 
@@ -27,7 +29,7 @@ SOLIDWORKS を Python（COM）から操作して、**人が後から開いて直
 ```
 git clone git@github.com:waarrk/swkit.git
 python -m venv .venv
-.venv\Scripts\pip install -e swkit[rapid]
+.venv\Scripts\pip install -e swkit[rapid,doc]
 .venv\Scripts\swkit setup
 ```
 
@@ -49,8 +51,11 @@ cd <プロジェクト名>
 python src\<名前>uild.py
 ```
 
-`swkit new` は、設計パラメータ（`ANALYSIS/params.py`）、生成スクリプトの見本（台板とブロックを共締めする最小の例）、
-プロジェクトの決まり（`CLAUDE.md`）、フォルダ構成を作ります。見本を自分の設計に書き換えて使います。
+`swkit new` は、設計パラメータ（`analysis/params.py`）、生成スクリプトの見本（台板とブロックを共締めする最小の例）、
+プロジェクトの決まり（`CLAUDE.md`）、ISO 9001 の設計・開発の段階に沿った文書フォルダ（`doc/00_管理` 〜 `09_提出`）、
+文書管理台帳、詳細設計書の原稿のひな形を作ります。見本を自分の設計に書き換えて使います。
+
+正式文書は `python -m swkit.docgen doc_設計\<文書番号>_詳細設計書.md` で Word と PDF になります。
 
 ## 設定
 
