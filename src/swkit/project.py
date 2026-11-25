@@ -212,6 +212,23 @@ class Project:
             self.record(name, rows, (t0[0] + i * dx, t0[1], t0[2]), unit)
         return seed
 
+    def group_of(self, asm, items, pitch, n, label, axis="x"):
+        """組になった部品をまとめて，構成部品の直線パターンで軸 axis の + 方向へ n 組に並べる。
+
+        items: 1 組目の部品 [(名前, rows, t, unit)]。t は式。1 組目だけを合致で拘束し，残りはパターンに従わせる。
+        アセンブリのツリーには 1 組目とパターン 1 つだけが残り，合致と基準平面は 1 組ぶんで済む。
+        """
+        seeds = [self.place(asm, name, rows, t, unit=unit) for name, rows, t, unit in items]
+        if n > 1:
+            asm.linear(seeds, n, pitch, label, axis)
+        j, d = "xyz".index(axis), asm.val(pitch)
+        for i in range(1, n):
+            for name, rows, t, unit in items:
+                t0 = [asm.val(c) for c in t]
+                t0[j] += i * d
+                self.record(name, rows, t0, unit)
+        return seeds
+
     def comps(self, top, unit, name, first_only=False):
         """トップアセンブリから見た構成部品（サブアセンブリ unit の中の部品 name）。
 

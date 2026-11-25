@@ -1210,6 +1210,7 @@ class Asm(Doc):
         super().__init__(sw, doc, params)
         self._pn = {}                      # 構成部品名 -> その文書の基準平面名
         self._axis = None
+        self._axes = {}                    # 軸番号 -> 基準軸（Y, Z。X は _axis）
 
     def stem(self):
         """拡張子を除いた文書名を返す．"""
@@ -1330,24 +1331,50 @@ class Asm(Doc):
         f.Name = name
         return f
 
-    @timed("構成部品パターン")
-    def linear(self, comp, n, pitch, name):
-        """構成部品を中心軸（X）の + 方向へピッチ pitch で n 個に並べる（構成部品の直線パターン）。
+    def axis_of(self, axis="x"):
+        """基準平面 2 枚の交線の基準軸（x / y / z）。構成部品パターンの方向に使う。X 軸は axis_x と同じ軸。"""
+        j = "xyz".index(axis)
+        if j == 0:
+            return self.axis_x()
+        if j not in self._axes:
+            pl = self.planes()
+            a, b = (("front", "right"), ("top", "right"))[j - 1]     # Y 軸 = 正面∩右側面、Z 軸 = 平面∩右側面
+            self.doc.ClearSelection2(True)
+            pl[a].Select2(False, 0)
+            pl[b].Select2(True, 0)
+            self.doc.InsertAxis2(True)
+            found, f = None, call0(self.doc, "FirstFeature")
+            while f is not None:
+                if call0(f, "GetTypeName2") == "RefAxis":
+                    found = f
+                f = call0(f, "GetNextFeature")
+            found.Name = f"{AXIS_NAME} {axis.upper()}"
+            self.doc.ClearSelection2(True)
+            self._axes[j] = found
+        return self._axes[j]
 
-        積層した同じ部品（座金，スペーサ，圧電素子など）に使う。ピッチは式につなぐ。
+    @timed("構成部品パターン")
+    def linear(self, comp, n, pitch, name, axis="x"):
+        """構成部品を軸 axis（x / y / z）の + 方向へピッチ pitch で n 個に並べる（構成部品の直線パターン）。
+
+        comp は構成部品 1 個か，そのリスト。リストを渡すと，組になった部品（台と，それに付くねじなど）をまとめて並べる。
+        積層した同じ部品（座金，スペーサ，圧電素子など）や，等ピッチで並ぶユニットに使う。ピッチは式につなぐ。
         向きは API の既定に任せず，並んだ構成部品の位置で確かめる。
         """
-        ax = self.axis_x()
+        comps = list(comp) if isinstance(comp, (list, tuple)) else [comp]
+        j = "xyz".index(axis)
+        ax = self.axis_of(axis)
         root = M(self.doc.ConfigurationManager.ActiveConfiguration, "GetRootComponent3", True)
 
         def xs():
-            return {c.Name2: c.Transform2.ArrayData[9] for c in (call0(root, "GetChildren") or ())}
+            return {c.Name2: c.Transform2.ArrayData[9 + j] for c in (call0(root, "GetChildren") or ())}
         before = xs()
-        x0 = before[comp.Name2]
+        x0 = min(before[c.Name2] for c in comps)
         for flip in (False, True):
             self.doc.ClearSelection2(True)
             ax.Select2(False, 2)
-            M(comp, "Select4", True, self._mark(self.doc.SelectionManager, 1), False)
+            for c in comps:
+                M(c, "Select4", True, self._mark(self.doc.SelectionManager, 1), False)
             f = M(self.doc.FeatureManager, "FeatureLinearPattern5", int(n), self.val(pitch) * MM, 1, 0.0,
                   flip, False, "NULL", "NULL", False, False, False, False, False, False, False, False,
                   False, False, 0.0, 0.0, False, False)
@@ -1355,7 +1382,7 @@ class Asm(Doc):
             if f is None:
                 continue
             new = [x for k, x in xs().items() if k not in before]
-            if len(new) == int(n) - 1 and all(x > x0 for x in new):
+            if len(new) == (int(n) - 1) * len(comps) and all(x > x0 for x in new):
                 f.Name = name
                 dd = call0(f, "GetFirstDisplayDimension")
                 while dd is not None:                  # 個数の寸法もあるので，値がピッチに等しい寸法を選ぶ

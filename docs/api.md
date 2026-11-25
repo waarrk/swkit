@@ -98,6 +98,8 @@ SOLIDWORKS API(COM) の薄いラッパ。
 | `revolve(name, cut=False)` | スケッチ内の中心線まわりに 360°（旋削）。 |
 | `cut_through(name)` | スケッチ面の両側へ全貫通（窓・角穴の切り抜き）。 |
 | `base_flange(width, t, r, name)` | 板金のベースフランジ。開いた輪郭（曲げ断面）をスケッチ面の両側へ合計 width 押し出す。 |
+| `sketch_face(base, w, at=(0, 0), from_pos=True)` | 部品の平らな面にスケッチを開く。base: 面の向き（front / top / right）、w: 法線方向の位置、at: 面内の 1 点。 |
+| `sketched_bend(angle, r, fixed, name, flip=False)` | 板金の平らな面に描いた 1 本の線で板を折る（スケッチ曲げ）。平板を抜いてから曲げる工程をそのまま表す。 |
 | `cable(pts, d, name)` | 点列 pts（モデル座標 mm）を通る 3D スプラインに沿った丸断面のケーブル。ほかのボディとは結合しない。 |
 | `keep_sketch(name)` | フィーチャにせずスケッチのまま残す（レイアウト用）。 |
 | `find_edges(pts)` | モデル座標 (x, y, z) mm の点を通るエッジを返す。表示の向きに左右されないよう形状から探す。 |
@@ -123,7 +125,8 @@ SOLIDWORKS API(COM) の薄いラッパ。
 | `keep_sketch(name)` | スケッチを閉じ，名前を付けてレイアウトスケッチとして残す． |
 | `axis_x()` | X 軸（正面∩平面）の基準軸。構成部品の円形パターンの中心。 |
 | `circular(comp, n, name)` | 構成部品を中心軸まわりに等配 n 個（構成部品の円形パターン）。 |
-| `linear(comp, n, pitch, name)` | 構成部品を中心軸（X）の + 方向へピッチ pitch で n 個に並べる（構成部品の直線パターン）。 |
+| `axis_of(axis='x')` | 基準平面 2 枚の交線の基準軸（x / y / z）。構成部品パターンの方向に使う。X 軸は axis_x と同じ軸。 |
+| `linear(comp, n, pitch, name, axis='x')` | 構成部品を軸 axis（x / y / z）の + 方向へピッチ pitch で n 個に並べる（構成部品の直線パターン）。 |
 | `leaves()` | 部品の構成部品をすべて返す（サブアセンブリの中も含む）。 |
 | `show_only(keep=None)` | keep(名前) が真の部品だけを表示する。keep=None で全部を表示に戻す。組立の途中の状態を画像にするときに使う。 |
 | `unconstrained()` | 完全に拘束されていない構成部品の名前。 |
@@ -153,6 +156,7 @@ SOLIDWORKS API(COM) の薄いラッパ。
 | `place(asm, name, rows=I3, t=(0, 0, 0), unit='')` | 軸に平行な姿勢の部品を、アセンブリの基準平面 3 枚に一致させて拘束する。t は式。 |
 | `ring_of(asm, name, x, pcd, n, unit, label)` | X 軸まわりの PCD 上の 1 個を合致で拘束し、構成部品の円形パターンで n 個にする。 |
 | `row_of(asm, name, t, pitch, n, unit, label, rows=I3)` | 位置 t の 1 個を合致で拘束し、構成部品の直線パターンで X の + 方向へ n 個に並べる。 |
+| `group_of(asm, items, pitch, n, label, axis='x')` | 組になった部品をまとめて，構成部品の直線パターンで軸 axis の + 方向へ n 組に並べる。 |
 | `comps(top, unit, name, first_only=False)` | トップアセンブリから見た構成部品（サブアセンブリ unit の中の部品 name）。 |
 | `shared_hole(base, w, pts, size, name, targets, depth, from_pos=True)` | 相手部品と共締めする穴の宣言。build() がトップアセンブリの穴フィーチャとして開け、加工部品へ反映する。 |
 | `build(top_path, units, holes=(), layout=None, title=None, out_dir=None, image_dir=None, prefix='asm')` | アセンブリから設計する手順をまとめて実行する。 |
