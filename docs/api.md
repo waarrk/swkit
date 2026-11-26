@@ -120,7 +120,8 @@ SOLIDWORKS API(COM) の薄いラッパ。
 | `stem()` | 拡張子を除いた文書名を返す． |
 | `insert(path, rows=((1, 0, 0), (0, 1, 0), (0, 0, 1)), t=(0, 0, 0))` | 構成部品を姿勢 rows・位置 t(mm) の近くに置く。拘束は合致で別に付ける。 |
 | `mate(kind, e1, e2)` | 2 つの要素を合致させる。向きは現在の姿勢に近い側を採る。 |
-| `place(path, rows=((1, 0, 0), (0, 1, 0), (0, 0, 1)), t=(0, 0, 0))` | 軸に平行な姿勢の構成部品を、基準平面 3 枚との一致で拘束する。 |
+| `mate_distance(comp, what, j, expr)` | 構成部品の基準平面 what を、アセンブリの既定の平面（軸 j に垂直）から式 expr の距離に合致させる。 |
+| `place(path, rows=((1, 0, 0), (0, 1, 0), (0, 0, 1)), t=(0, 0, 0), distance=False)` | 軸に平行な姿勢の構成部品を、基準平面 3 枚との一致で拘束する。 |
 | `sketch(base, plane=None)` | アセンブリのレイアウトスケッチ。plane を省くと既定の平面に描く。 |
 | `keep_sketch(name)` | スケッチを閉じ，名前を付けてレイアウトスケッチとして残す． |
 | `axis_x()` | X 軸（正面∩平面）の基準軸。構成部品の円形パターンの中心。 |
@@ -153,10 +154,10 @@ SOLIDWORKS API(COM) の薄いラッパ。
 | `vendor(src, dst, rows, origin, mat, mass, color=ORANGE, axis=False, **props)` | メーカー配布の 3D データを取り込み、原点と向きをそろえて既製品の部品として保存する。 |
 | `existing(path, rho=None)` | 既にある部品ファイル（RAPiD Design で取り込んだ MISUMI 品など）を、作り直さずに既製品として登録する。 |
 | `record(name, rows, t, unit, comp=None)` | 配置した 1 個の質量・体積・重心を控える。t は数値 mm。 |
-| `place(asm, name, rows=I3, t=(0, 0, 0), unit='')` | 軸に平行な姿勢の部品を、アセンブリの基準平面 3 枚に一致させて拘束する。t は式。 |
+| `place(asm, name, rows=I3, t=(0, 0, 0), unit='', distance=False)` | 軸に平行な姿勢の部品を、アセンブリの基準平面 3 枚に一致させて拘束する。t は式。 |
 | `ring_of(asm, name, x, pcd, n, unit, label)` | X 軸まわりの PCD 上の 1 個を合致で拘束し、構成部品の円形パターンで n 個にする。 |
 | `row_of(asm, name, t, pitch, n, unit, label, rows=I3)` | 位置 t の 1 個を合致で拘束し、構成部品の直線パターンで X の + 方向へ n 個に並べる。 |
-| `group_of(asm, items, pitch, n, label, axis='x')` | 組になった部品をまとめて，構成部品の直線パターンで軸 axis の + 方向へ n 組に並べる。 |
+| `group_of(asm, items, pitch, n, label, axis='x', distance=False)` | 組になった部品をまとめて，構成部品の直線パターンで軸 axis の + 方向へ n 組に並べる。 |
 | `comps(top, unit, name, first_only=False)` | トップアセンブリから見た構成部品（サブアセンブリ unit の中の部品 name）。 |
 | `shared_hole(base, w, pts, size, name, targets, depth, from_pos=True)` | 相手部品と共締めする穴の宣言。build() がトップアセンブリの穴フィーチャとして開け、加工部品へ反映する。 |
 | `build(top_path, units, holes=(), layout=None, title=None, out_dir=None, image_dir=None, prefix='asm')` | アセンブリから設計する手順をまとめて実行する。 |

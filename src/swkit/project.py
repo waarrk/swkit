@@ -186,9 +186,12 @@ class Project:
         if comp is not None:
             self.comp.setdefault((unit, name), []).append(comp.Name2)
 
-    def place(self, asm, name, rows=I3, t=(0, 0, 0), unit=""):
-        """軸に平行な姿勢の部品を、アセンブリの基準平面 3 枚に一致させて拘束する。t は式。"""
-        comp = asm.place(self.parts[name][0], rows, t)
+    def place(self, asm, name, rows=I3, t=(0, 0, 0), unit="", distance=False):
+        """軸に平行な姿勢の部品を、アセンブリの基準平面 3 枚に一致させて拘束する。t は式。
+
+        distance=True なら、位置が 0 でない方向は基準平面を作らず、既定の平面からの距離合致で拘束する。
+        """
+        comp = asm.place(self.parts[name][0], rows, t, distance=distance)
         self.record(name, rows, [asm.val(c) for c in t], unit, comp)
         return comp
 
@@ -212,13 +215,13 @@ class Project:
             self.record(name, rows, (t0[0] + i * dx, t0[1], t0[2]), unit)
         return seed
 
-    def group_of(self, asm, items, pitch, n, label, axis="x"):
+    def group_of(self, asm, items, pitch, n, label, axis="x", distance=False):
         """組になった部品をまとめて，構成部品の直線パターンで軸 axis の + 方向へ n 組に並べる。
 
         items: 1 組目の部品 [(名前, rows, t, unit)]。t は式。1 組目だけを合致で拘束し，残りはパターンに従わせる。
         アセンブリのツリーには 1 組目とパターン 1 つだけが残り，合致と基準平面は 1 組ぶんで済む。
         """
-        seeds = [self.place(asm, name, rows, t, unit=unit) for name, rows, t, unit in items]
+        seeds = [self.place(asm, name, rows, t, unit=unit, distance=distance) for name, rows, t, unit in items]
         if n > 1:
             asm.linear(seeds, n, pitch, label, axis)
         j, d = "xyz".index(axis), asm.val(pitch)

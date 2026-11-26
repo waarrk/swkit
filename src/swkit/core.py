@@ -1203,7 +1203,7 @@ class Part(Doc):
 class Asm(Doc):
     """構成部品はレイアウトスケッチと基準平面に合致で拘束する。固定は使わない。"""
 
-    COINCIDENT, PARALLEL = 0, 3
+    COINCIDENT, PARALLEL, DISTANCE = 0, 3, 5
 
     def __init__(self, sw, doc, params=None):
         """アセンブリの文書を包む．"""
@@ -1269,18 +1269,76 @@ class Asm(Doc):
             raise RuntimeError(f"合致に失敗 (err={err.value}): {e1} / {e2}")
         return m
 
-    def place(self, path, rows=((1, 0, 0), (0, 1, 0), (0, 0, 1)), t=(0, 0, 0)):
+    def _last_mate(self):
+        """いちばん新しい合致のフィーチャ。"""
+        last, f = None, call0(self.doc, "FirstFeature")
+        while f is not None:
+            if call0(f, "GetTypeName2") == "MateGroup":
+                s = call0(f, "GetFirstSubFeature")
+                while s is not None:
+                    last = s
+                    s = call0(s, "GetNextSubFeature")
+            f = call0(f, "GetNextFeature")
+        return last
+
+    @timed("合致")
+    def mate_distance(self, comp, what, j, expr):
+        """構成部品の基準平面 what を、アセンブリの既定の平面（軸 j に垂直）から式 expr の距離に合致させる。
+
+        基準平面を作らずに位置を決める。距離の寸法は式につなぐ。距離合致はどちら側にも付くので、
+        向きは API の既定に任せず、構成部品の原点の位置で確かめて、違えば反対向きで付け直す。
+        """
+        want = self.val(expr) * MM
+        base = self.planes()[("right", "top", "front")[j]]
+        for flip in (False, True):
+            self.doc.ClearSelection2(True)
+            self._pick((comp, what))
+            self._pick(base)
+            err = _byref_int()
+            d = abs(want)
+            m = M(self.doc, "AddMate5", self.DISTANCE, 2, flip, d, d, d, 0.0, 0.0, 0.0, 0.0, 0.0, False, False, 0, err)
+            self.doc.ClearSelection2(True)
+            if m is None:
+                continue
+            if abs(comp.Transform2.ArrayData[9 + j] - want) > 1e-7:
+                M(self.doc, "EditRebuild3")
+            feat = self._last_mate()
+            if abs(comp.Transform2.ArrayData[9 + j] - want) < 1e-7:
+                dd = call0(feat, "GetFirstDisplayDimension") if feat is not None else None
+                if dd is not None:
+                    self.link(M(dd, "GetDimension2", 0), expr)
+                else:
+                    self.warn(f"距離合致の寸法が見つからない: {expr}")
+                label = self.labels.get(str(expr))
+                if label and feat is not None:
+                    try:
+                        feat.Name = f"{label}（{comp.Name2}）"
+                    except Exception:
+                        pass
+                return m
+            if feat is not None:                       # 反対側に付いた。消して向きを変える
+                self.doc.ClearSelection2(True)
+                feat.Select2(False, 0)
+                M(self.doc, "EditDelete")
+        raise RuntimeError(f"距離合致に失敗: {comp.Name2} {what} = {expr}")
+
+    def place(self, path, rows=((1, 0, 0), (0, 1, 0), (0, 0, 1)), t=(0, 0, 0), distance=False):
         """軸に平行な姿勢の構成部品を、基準平面 3 枚との一致で拘束する。
 
         t は式で与える。部品の 3 つの基準平面それぞれを、その面が重なる位置のアセンブリ基準平面
         （無ければ作る）に一致させる。
+        distance=True なら、位置が 0 でない方向は基準平面を作らず、既定の平面からの距離合致で拘束する。
+        ボルトやスペーサのように数が多く、位置ごとの基準平面に意味が無い部品に使う。
         """
         comp = self.insert(path, rows, [self.val(c) for c in t])
         for i, what in enumerate(("right", "top", "front")):     # 部品の X, Y, Z 軸に垂直な面
             j = max(range(3), key=lambda k: abs(rows[i][k]))
             if abs(abs(rows[i][j]) - 1) > 1e-9:
                 raise RuntimeError("place は軸に平行な姿勢だけを扱う")
-            self.mate(self.COINCIDENT, (comp, what), self.ref_plane(j, t[j]))
+            if distance and not _is0(self.val(t[j])):
+                self.mate_distance(comp, what, j, t[j])
+            else:
+                self.mate(self.COINCIDENT, (comp, what), self.ref_plane(j, t[j]))
         if SW.SHOW:
             M(self.doc, "ViewZoomtofit2")
         return comp
