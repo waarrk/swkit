@@ -201,6 +201,57 @@ MISUMI RAPiD Design（SOLIDWORKS アドイン）から、型番を指定して�
 | `fetch_one(spec, dest)` | 型番 spec のモデルを取り込み、dest/MISUMI_<型番>.SLDPRT に保存する。プロパティの辞書を返す。 |
 | `fetch(specs, dest)` | 型番のリストを取り込む。保存先に既にある型番は飛ばす。結果は dest/MISUMI_parts.csv に追記・更新する。 |
 
+## swkit.meviy
+
+meviy（ミスミの加工品の見積りサービス）に加工品を入れ，作れるかどうかと見積りを読み取る．
+
+| 関数 | 説明 |
+| --- | --- |
+| `wait(page, cond, what, timeout_s=60, step_ms=250)` | cond() が真になるまで待つ．固定の待ち時間を置かず，状態が変わりしだい先へ進む．時間切れなら False． |
+| `lines(page)` | 画面の文字を行ごとに返す． |
+| `visible(loc)` |  |
+| `press(page, label)` | 見積りのためのボタンを押す．押してよいボタンは ALLOWED だけ． |
+| `open_browser(p, headless=False)` | インストール済みの Chrome を専用のプロファイルで開く． |
+| `logged_in(page)` |  |
+| `start(p)` | ブラウザを開き，マイページが使える状態になるまで待つ．ログインが切れていれば止める． |
+| `login()` | ブラウザを開き，人がログインを終えるまで待つ（最長 15 分）． |
+| `hide_overlays(page)` | 一覧の上にかぶさる小窓（アップロード完了の一覧，案内）を隠す．行の操作をふさぐため． |
+| `folder_label(page, name)` | 左のフォルダ一覧にある name の行（同じ名前が複数あれば 1 つ目）． |
+| `settled(page, selector, what, timeout_s=15, allow_empty=False)` | selector に当たる要素の数が 1 秒変わらなくなるまで待つ．一覧は少しずつ出るので，出そろう前に数えない． |
+| `folders_loaded(page)` | 左のフォルダ一覧が出そろうまで待つ．出る前に「無い」と判断すると，同じ名前のフォルダを作ってしまう． |
+| `ensure_folder(page, name)` | フォルダが無ければ作る．マイページの直下には部品を置かない． |
+| `enter_folder(page, name, expect_rows=True)` | フォルダに入り，一覧が出るまで待つ． |
+| `row_of(page, file_name)` |  |
+| `has_viewer_link(page, file_name)` |  |
+| `upload(page, folder, files)` | フォルダに入り，まだ無い部品ファイルをアップロードして，一覧に出そろうまで待つ． |
+| `set_method(page, file_name, method)` | 一覧で加工方法を合わせる．形状の認識が終わるのは待たない（あとでまとめて待つ）． |
+| `viewer_ready(page)` |  |
+| `close_notice(page)` | ビューアを開いたときの小窓を閉じ，先へ進めない理由があればそれを返す（無ければ空）． |
+| `set_method_in_viewer(page, method)` | ビューアの加工方法を合わせる．変えたら，形状の認識が終わって品名が出直すまで待つ． |
+| `set_material(page, tab, material, surface_word)` | 材質と表面処理を選ぶ．選べた表面処理の名前を返す（選べなければ None）． |
+| `quote_state(page)` | 見積りの進み具合．'金額' / '対象外' / '不可' / '確定待ち' / '開始待ち' / '計算中'． |
+| `cautions_of(t)` | 画面の文字から注意事項の欄を抜き出す． |
+| `parse(t)` | 画面の文字から 型番・単価（1 個）・出荷日・状態 を拾う． |
+| `prices_of(t)` | 画面の文字から，金額をすべて拾う．納期ごとの単価（特急・標準・長納期）と，数量ごとの単価． |
+| `at_quantity(prices, qty)` | 数量 qty のときの単価・出荷日・小計を，数量スライド割引の表から求める．表の範囲を超える数量は None． |
+| `quote(page, ctx, folder, plan, out, details=False)` | 計画の部品に加工方法と材質を設定し，見積りを読む．結果の一覧を返す． |
+| `caution_details(page, out=None, stem='')` | 開いているビューアで，注意事項を 1 件ずつ開いて説明の文を読む．[(見出し, 説明)] を返す． |
+| `requirements(found)` | 注意事項の説明から「どの寸法を，いまの値から，いくつ以上にするか」を抜き出す． |
+| `check(page, ctx, folder, row, file, name, out)` | 1 部品を名前 name でアップロードし，見積りと注意事項の詳細を読む．形を直しながら繰り返し確かめるための 1 回分． |
+| `read_cautions(page, folder, file_name, out, stem)` | 部品の注意事項を 1 件ずつ開いて，説明の文と画面を残す． |
+| `read_plan(path, only=())` |  |
+| `save(path, results, partial)` |  |
+| `main(argv=None)` | コマンドラインの入口． |
+
+### Waits
+
+待った場所と秒数の記録．遅い場所を見つけるために，最後に表にする．
+
+| メソッド | 説明 |
+| --- | --- |
+| `add(what, dt, ok)` |  |
+| `report()` |  |
+
 ## swkit.docgen
 
 Markdown の原稿から、顧客へ提出できる体裁の文書（Word と PDF）を作る。

@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src" / "swkit"
-MODULES = [("core", "SOLIDWORKS の操作"), ("project", "設計の手順"), ("vendor", "製造元の配布データ"), ("rapid", "MISUMI RAPiD Design"),
+MODULES = [("core", "SOLIDWORKS の操作"), ("project", "設計の手順"), ("vendor", "製造元の配布データ"), ("rapid", "MISUMI RAPiD Design"), ("meviy", "meviy での加工品の見積り"),
            ("docgen", "正式文書の生成"), ("audit", "モデルの点検"), ("cli", "コマンド"), ("config", "設定")]
 
 
