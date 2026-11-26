@@ -19,6 +19,7 @@ import threading
 import re
 import time
 import types
+import unicodedata
 from pathlib import Path
 
 import pythoncom
@@ -130,7 +131,10 @@ class DialogWatch(threading.Thread):
     既定のボタンを押して先へ進める。それ以外は押さない（内容の分からないダイアログに勝手に答えない）。
     """
 
-    ANSWER = [("リソース", "不足")]     # この語をすべて含むダイアログは既定のボタンで進める
+    # (ダイアログに含まれる語, 押すボタンの名前の先頭)。語をすべて含むダイアログは，そのボタンを押して進める．
+    # SOLIDWORKS のダイアログは半角カナ（ﾘｿｰｽ）で書かれているので，全角にそろえてから比べる．
+    # 「システム リソースが極端に不足しています．続行しますか?」は，既定のボタンが「いいえ」なので「はい」を名前で押す
+    ANSWER = [(("リソース", "不足", "続行"), "はい")]
     _u = ctypes.windll.user32
     _ENUM = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
 
@@ -165,6 +169,19 @@ class DialogWatch(threading.Thread):
         self._u.EnumWindows(self._ENUM(each), 0)
         return found
 
+    def _press(self, h, label):
+        """ダイアログ h の中で，名前が label で始まるボタンを押す．"""
+        hit = []
+
+        def each(c, _):
+            if unicodedata.normalize("NFKC", self._text(c)).startswith(label) and self._class(c) == "Button":
+                hit.append(c)
+            return True
+        self._u.EnumChildWindows(ctypes.c_void_p(h), self._ENUM(each), 0)
+        if hit:
+            self._u.PostMessageW(ctypes.c_void_p(hit[0]), 0x00F5, 0, 0)          # BM_CLICK
+        return bool(hit)
+
     def _body(self, h):
         texts = []
 
@@ -184,13 +201,12 @@ class DialogWatch(threading.Thread):
                     if h not in self.seen:
                         rec = self.seen[h] = [self._text(h), self._body(h), now, now, False]
                         print(f"  ! SOLIDWORKS のダイアログ: [{rec[0]}] {rec[1][:200]}", flush=True)
-                        whole = rec[0] + rec[1]
-                        if any(all(w in whole for w in words) for words in self.ANSWER):
-                            ident = self._u.SendMessageW(ctypes.c_void_p(h), 0x0400, 0, 0)       # DM_GETDEFID
-                            if (ident >> 16) == 0x534B:                                          # DC_HASDEFID
-                                self._u.PostMessageW(ctypes.c_void_p(h), 0x0111, ident & 0xFFFF, 0)   # WM_COMMAND
+                        whole = unicodedata.normalize("NFKC", rec[0] + rec[1])
+                        for words, label in self.ANSWER:
+                            if all(w in whole for w in words) and self._press(h, label):
                                 rec[4] = True
-                                print("    既定のボタンを押して進めた", flush=True)
+                                print(f"    「{label}」を押して進めた", flush=True)
+                                break
                     self.seen[h][3] = now
                 for h in [h for h in self.seen if h not in live]:
                     self.log.append(self.seen.pop(h))
@@ -204,6 +220,17 @@ class DialogWatch(threading.Thread):
             self.join(2)
         rows = self.log + list(self.seen.values())
         return [{"title": r[0], "text": r[1], "seconds": round(r[3] - r[2], 1), "answered": r[4]} for r in rows]
+
+
+def commit_free_mb():
+    """システム全体のコミットの空き（MB）．取れなければ 0．"""
+    class MS(ctypes.Structure):
+        _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong)] + [
+            (n, ctypes.c_ulonglong) for n in ("ullTotalPhys", "ullAvailPhys", "ullTotalPageFile", "ullAvailPageFile",
+                                              "ullTotalVirtual", "ullAvailVirtual", "ullAvailExtendedVirtual")]
+    m = MS()
+    m.dwLength = ctypes.sizeof(MS)
+    return m.ullAvailPageFile / 2 ** 20 if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)) else 0.0
 
 
 def process_memory_mb(pid):
@@ -232,6 +259,8 @@ class SW:
     SHOW = False
     # SOLIDWORKS の確保メモリがこれを超えていて、文書が開いていなければ、接続時に再起動する
     MEM_LIMIT_MB = 6000
+    # コミットの空きがこれを下回っていたら，接続時に知らせる
+    COMMIT_WARN_MB = 8000
 
     def __init__(self, params=None):
         """SOLIDWORKS に接続し，生成中だけ画面更新と視点のアニメーションを止める．params は設計値のモジュール．"""
@@ -268,6 +297,11 @@ class SW:
         生成を何十回も続けると、文書をすべて閉じてもメモリが解放されずに溜まり、処理が遅くなって
         リソース不足のダイアログで止まる。文書が開いているときは、人の作業中かもしれないので再起動せず、知らせるだけにする。
         """
+        free = commit_free_mb()
+        if 0 < free < self.COMMIT_WARN_MB:
+            # SOLIDWORKS の「システム リソースが極端に不足しています」は，空きメモリではなくコミットの空き（メモリ + ページファイル）で出る
+            print(f"  ! コミットの空きが {free:,.0f} MB しかない．リソース不足のダイアログが出やすい"
+                  "（ほかのアプリを閉じるか，ページファイルを大きくする）")
         pid = call0(self.app, "GetProcessID")
         mb = process_memory_mb(pid)
         if mb < self.MEM_LIMIT_MB:
