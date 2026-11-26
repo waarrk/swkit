@@ -10,6 +10,7 @@ SOLIDWORKS API(COM) の薄いラッパ。
 | --- | --- |
 | `M(obj, name, *args)` | メソッドを確実にメソッドとして呼ぶ（プロパティ取得と誤認されるのを防ぐ）。 |
 | `call0(obj, name)` | 引数なしメソッド/プロパティのどちらでも値を得る（遅延バインディング対策）。 |
+| `process_memory_mb(pid)` | プロセスが確保しているメモリ（プライベートバイト）を MB で返す。取れなければ 0。 |
 
 ### Profile
 
@@ -18,7 +19,18 @@ SOLIDWORKS API(COM) の薄いラッパ。
 | メソッド | 説明 |
 | --- | --- |
 | `timed(label)` | 処理の所要時間を種類ごとに積算するデコレータ． |
+| `span(label)` | with で囲んだ区間の所要時間を、種類 label に積算する（関数の一部だけを測るとき）。 |
 | `report(total=None)` | 処理の種類ごとの回数と所要時間を表示し，辞書で返す． |
+
+### DialogWatch
+
+生成中に SOLIDWORKS が出したダイアログを記録する（別スレッドで窓を見張る）。
+
+| メソッド | 説明 |
+| --- | --- |
+| `__init__(pid, period=0.5)` |  |
+| `run()` |  |
+| `stop()` | 見張りを止め、出たダイアログの一覧（題名、本文、出ていた秒数、自動で押したか）を返す。 |
 
 ### SW
 
@@ -128,6 +140,7 @@ SOLIDWORKS API(COM) の薄いラッパ。
 | `circular(comp, n, name)` | 構成部品を中心軸まわりに等配 n 個（構成部品の円形パターン）。 |
 | `axis_of(axis='x')` | 基準平面 2 枚の交線の基準軸（x / y / z）。構成部品パターンの方向に使う。X 軸は axis_x と同じ軸。 |
 | `linear(comp, n, pitch, name, axis='x')` | 構成部品を軸 axis（x / y / z）の + 方向へピッチ pitch で n 個に並べる（構成部品の直線パターン）。 |
+| `driven(comp, host, feature, name)` | 構成部品を、相手の部品 host が持つパターン feature に従わせて並べる（パターン駆動構成部品パターン）。 |
 | `leaves()` | 部品の構成部品をすべて返す（サブアセンブリの中も含む）。 |
 | `show_only(keep=None)` | keep(名前) が真の部品だけを表示する。keep=None で全部を表示に戻す。組立の途中の状態を画像にするときに使う。 |
 | `unconstrained()` | 完全に拘束されていない構成部品の名前。 |
@@ -153,11 +166,13 @@ SOLIDWORKS API(COM) の薄いラッパ。
 | `finish(part, path, mat, color=GREY, transparency=0.0, mass=None, **props)` | 材料・色・プロパティを設定して保存する。 |
 | `vendor(src, dst, rows, origin, mat, mass, color=ORANGE, axis=False, **props)` | メーカー配布の 3D データを取り込み、原点と向きをそろえて既製品の部品として保存する。 |
 | `existing(path, rho=None)` | 既にある部品ファイル（RAPiD Design で取り込んだ MISUMI 品など）を、作り直さずに既製品として登録する。 |
-| `record(name, rows, t, unit, comp=None)` | 配置した 1 個の質量・体積・重心を控える。t は数値 mm。 |
+| `kit(path, fn, title=None)` | 組になった部品をサブアセンブリにまとめ、部品と同じ名前で置けるようにする。名前（ファイル名）を返す。 |
+| `record(name, rows, t, unit, comp=None)` | 配置した 1 個の質量・体積・重心を控える。t は数値 mm。組（kit）は中の部品に展開して控える。 |
 | `place(asm, name, rows=I3, t=(0, 0, 0), unit='', distance=False)` | 軸に平行な姿勢の部品を、アセンブリの基準平面 3 枚に一致させて拘束する。t は式。 |
 | `ring_of(asm, name, x, pcd, n, unit, label)` | X 軸まわりの PCD 上の 1 個を合致で拘束し、構成部品の円形パターンで n 個にする。 |
 | `row_of(asm, name, t, pitch, n, unit, label, rows=I3)` | 位置 t の 1 個を合致で拘束し、構成部品の直線パターンで X の + 方向へ n 個に並べる。 |
 | `group_of(asm, items, pitch, n, label, axis='x', distance=False)` | 組になった部品をまとめて，構成部品の直線パターンで軸 axis の + 方向へ n 組に並べる。 |
+| `follow_of(asm, items, host, feature, label, distance=False)` | 組になった部品を、相手の部品 host のパターン feature に従わせて並べる（パターン駆動構成部品パターン）。 |
 | `comps(top, unit, name, first_only=False)` | トップアセンブリから見た構成部品（サブアセンブリ unit の中の部品 name）。 |
 | `shared_hole(base, w, pts, size, name, targets, depth, from_pos=True)` | 相手部品と共締めする穴の宣言。build() がトップアセンブリの穴フィーチャとして開け、加工部品へ反映する。 |
 | `build(top_path, units, holes=(), layout=None, title=None, out_dir=None, image_dir=None, prefix='asm')` | アセンブリから設計する手順をまとめて実行する。 |

@@ -82,6 +82,7 @@ class Project:
         self.parts = {}        # 名前 -> (path, 質量, 体積, 重心)
         self.instances = []    # 配置した部品 1 個ずつの質量・体積・重心（トップアセンブリ座標）
         self.comp = {}         # (ユニット, 部品名) -> [構成部品名]
+        self.kits = {}         # 組の名前 -> 中の部品の控え（組の原点を基準）
         self.warned = []
         self._tree = None
         self._last = None
@@ -178,8 +179,46 @@ class Project:
         return path.stem
 
     # ------------------------------------------------------------ 配置
+    def kit(self, path, fn, title=None):
+        """組になった部品をサブアセンブリにまとめ、部品と同じ名前で置けるようにする。名前（ファイル名）を返す。
+
+        fn(asm) が組の中を組み立てる（組の原点を基準に、place などで置く）。返った名前は place / group_of / follow_of に渡せる。
+        同じ組を何個も使うとき、親のツリーには組が個数分だけ並び、中身は 1 か所を直せば全部に反映される。
+        配置の控え（質量・重心・部品表の数量）は、組を置くたびに中の部品へ展開して残す。
+        """
+        path = Path(path)
+        asm = self.new_asm(path)
+        n0, comp0 = len(self.instances), {k: len(v) for k, v in self.comp.items()}
+        fn(asm)
+        asm.rebuild()
+        asm.set_prop("品名", title or path.stem)
+        asm.save()
+        free = asm.unconstrained()
+        if free:
+            raise RuntimeError(f"{path.stem}: 拘束されていない構成部品 {free}")
+        if asm.warnings:
+            self.warned.append((path.stem, list(asm.warnings)))
+        inner, self.instances = self.instances[n0:], self.instances[:n0]       # 組の中の控えは、組の原点を基準にした値として持つ
+        for k in list(self.comp):                                              # 組の中の構成部品名は親から見た名前ではないので控えない
+            self.comp[k] = self.comp[k][:comp0.get(k, 0)]
+            if not self.comp[k]:
+                del self.comp[k]
+        m = sum(i["mass"] for i in inner)
+        cg = tuple(sum(i["mass"] * i["cg"][k] for i in inner) / m for k in range(3)) if m else (0.0, 0.0, 0.0)
+        self.parts[path.stem] = (path, m, sum(i["volume"] for i in inner), cg)
+        self.kits[path.stem] = inner
+        print(f"  組   {path.stem:<22} {m * 1000:8.1f} g  部品 {len(inner)} 個")
+        return path.stem
+
     def record(self, name, rows, t, unit, comp=None):
-        """配置した 1 個の質量・体積・重心を控える。t は数値 mm。"""
+        """配置した 1 個の質量・体積・重心を控える。t は数値 mm。組（kit）は中の部品に展開して控える。"""
+        if name in self.kits:
+            for i in self.kits[name]:
+                world = tuple(sum(i["cg"][a] * rows[a][k] for a in range(3)) + t[k] for k in range(3))
+                self.instances.append({"unit": unit, "part": i["part"], "mass": i["mass"], "volume": i["volume"], "cg": world})
+            if comp is not None:
+                self.comp.setdefault((unit, name), []).append(comp.Name2)
+            return
         _, m, v, cg = self.parts[name]
         world = tuple(sum(cg[i] * rows[i][k] for i in range(3)) + t[k] for k in range(3))
         self.instances.append({"unit": unit, "part": name, "mass": m, "volume": v, "cg": world})
@@ -230,6 +269,26 @@ class Project:
                 t0 = [asm.val(c) for c in t]
                 t0[j] += i * d
                 self.record(name, rows, t0, unit)
+        return seeds
+
+    def follow_of(self, asm, items, host, feature, label, distance=False):
+        """組になった部品を、相手の部品 host のパターン feature に従わせて並べる（パターン駆動構成部品パターン）。
+
+        items: 1 組目の部品 [(名前, rows, t, unit)]。パターンの 1 個目の位置に置く。host は相手の構成部品、
+        feature はその部品の中のフィーチャ名（点が複数の穴ウィザード、直線・円形パターン）。
+        個数と位置は相手の部品が決めるので、穴を変えるとねじも付いてくる。質量と重心は、増えた構成部品の実際の位置で控える。
+        """
+        seeds = [self.place(asm, name, rows, t, unit=unit, distance=distance) for name, rows, t, unit in items]
+        by_path = {str(Path(self.parts[name][0]).resolve()).lower(): (name, unit) for name, _, _, unit in items}
+        at = {(c.GetPathName.lower(), tuple(round(v * 1000, 2) for v in c.Transform2.ArrayData[9:12])) for c in seeds}
+        for c in asm.driven(seeds, host, feature, label):
+            name, unit = by_path[str(Path(c.GetPathName).resolve()).lower()]
+            a = c.Transform2.ArrayData
+            here = (c.GetPathName.lower(), tuple(round(v * 1000, 2) for v in a[9:12]))
+            if here in at:      # 1 組目を穴フィーチャの 1 点目以外に置くと、増えた部品が 1 組目と同じ位置に重なる
+                raise RuntimeError(f"{label}: 増えた部品が同じ位置に重なった {here[1]}。1 組目を {feature} の 1 点目の位置に置く")
+            at.add(here)
+            self.record(name, (a[0:3], a[3:6], a[6:9]), [v * 1000 for v in a[9:12]], unit)
         return seeds
 
     def comps(self, top, unit, name, first_only=False):

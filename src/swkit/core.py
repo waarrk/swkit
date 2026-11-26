@@ -11,8 +11,11 @@
 """
 from __future__ import annotations
 
+import contextlib
+import ctypes
 import functools
 import math
+import threading
 import re
 import time
 import types
@@ -87,6 +90,23 @@ class Profile:
         return deco
 
     @classmethod
+    @contextlib.contextmanager
+    def span(cls, label):
+        """with で囲んだ区間の所要時間を、種類 label に積算する（関数の一部だけを測るとき）。"""
+        cls._stack.append(0.0)
+        t0 = time.perf_counter()
+        try:
+            yield
+        finally:
+            dt = time.perf_counter() - t0
+            inner = cls._stack.pop()
+            rec = cls.data.setdefault(label, [0, 0.0])
+            rec[0] += 1
+            rec[1] += dt - inner
+            if cls._stack:
+                cls._stack[-1] += dt
+
+    @classmethod
     def report(cls, total=None):
         """処理の種類ごとの回数と所要時間を表示し，辞書で返す．"""
         rows = sorted(cls.data.items(), key=lambda kv: -kv[1][1])
@@ -102,15 +122,125 @@ class Profile:
 timed = Profile.timed
 
 
+class DialogWatch(threading.Thread):
+    """生成中に SOLIDWORKS が出したダイアログを記録する（別スレッドで窓を見張る）。
+
+    ダイアログが出ている間は API の呼び出しが返らず、人が押すまで生成が止まる。原因が分からないまま
+    遅くなるのを防ぐため、出た時刻・題名・本文・出ていた秒数を残す。ANSWER の語をすべて含むダイアログは
+    既定のボタンを押して先へ進める。それ以外は押さない（内容の分からないダイアログに勝手に答えない）。
+    """
+
+    ANSWER = [("リソース", "不足")]     # この語をすべて含むダイアログは既定のボタンで進める
+    _u = ctypes.windll.user32
+    _ENUM = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+    def __init__(self, pid, period=0.5):
+        super().__init__(daemon=True)
+        self.pid, self.period = pid, period
+        self.seen = {}                  # hwnd -> [題名, 本文, 出た時刻, 最後に見た時刻, 自動で押したか]
+        self.log = []
+        self._stop_evt = threading.Event()
+
+    @classmethod
+    def _text(cls, h):
+        buf = ctypes.create_unicode_buffer(600)
+        cls._u.GetWindowTextW(ctypes.c_void_p(h), buf, 600)
+        return buf.value
+
+    @classmethod
+    def _class(cls, h):
+        buf = ctypes.create_unicode_buffer(100)
+        cls._u.GetClassNameW(ctypes.c_void_p(h), buf, 100)
+        return buf.value
+
+    def _dialogs(self):
+        found = []
+
+        def each(h, _):
+            pid = ctypes.c_ulong()
+            self._u.GetWindowThreadProcessId(ctypes.c_void_p(h), ctypes.byref(pid))
+            if pid.value == self.pid and self._u.IsWindowVisible(ctypes.c_void_p(h)) and self._class(h) == "#32770":
+                found.append(h)
+            return True
+        self._u.EnumWindows(self._ENUM(each), 0)
+        return found
+
+    def _body(self, h):
+        texts = []
+
+        def each(c, _):
+            t = self._text(c).strip()
+            if t:
+                texts.append(t.replace("\r", "").replace("\n", " "))
+            return True
+        self._u.EnumChildWindows(ctypes.c_void_p(h), self._ENUM(each), 0)
+        return " / ".join(texts)
+
+    def run(self):
+        while not self._stop_evt.wait(self.period):
+            try:
+                now, live = time.time(), self._dialogs()
+                for h in live:
+                    if h not in self.seen:
+                        rec = self.seen[h] = [self._text(h), self._body(h), now, now, False]
+                        print(f"  ! SOLIDWORKS のダイアログ: [{rec[0]}] {rec[1][:200]}", flush=True)
+                        whole = rec[0] + rec[1]
+                        if any(all(w in whole for w in words) for words in self.ANSWER):
+                            ident = self._u.SendMessageW(ctypes.c_void_p(h), 0x0400, 0, 0)       # DM_GETDEFID
+                            if (ident >> 16) == 0x534B:                                          # DC_HASDEFID
+                                self._u.PostMessageW(ctypes.c_void_p(h), 0x0111, ident & 0xFFFF, 0)   # WM_COMMAND
+                                rec[4] = True
+                                print("    既定のボタンを押して進めた", flush=True)
+                    self.seen[h][3] = now
+                for h in [h for h in self.seen if h not in live]:
+                    self.log.append(self.seen.pop(h))
+            except Exception:
+                pass
+
+    def stop(self):
+        """見張りを止め、出たダイアログの一覧（題名、本文、出ていた秒数、自動で押したか）を返す。"""
+        self._stop_evt.set()
+        if self.is_alive():
+            self.join(2)
+        rows = self.log + list(self.seen.values())
+        return [{"title": r[0], "text": r[1], "seconds": round(r[3] - r[2], 1), "answered": r[4]} for r in rows]
+
+
+def process_memory_mb(pid):
+    """プロセスが確保しているメモリ（プライベートバイト）を MB で返す。取れなければ 0。"""
+    class PMC(ctypes.Structure):
+        _fields_ = [("cb", ctypes.c_ulong), ("PageFaultCount", ctypes.c_ulong)] + [
+            (n, ctypes.c_size_t) for n in ("PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage", "QuotaPagedPoolUsage",
+                                           "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage", "PagefileUsage",
+                                           "PeakPagefileUsage", "PrivateUsage")]
+    k = ctypes.windll.kernel32
+    k.OpenProcess.restype = ctypes.c_void_p
+    h = k.OpenProcess(0x1000 | 0x0010, False, int(pid))      # QUERY_LIMITED_INFORMATION | VM_READ
+    if not h:
+        return 0.0
+    try:
+        c = PMC()
+        c.cb = ctypes.sizeof(PMC)
+        ok = ctypes.windll.psapi.GetProcessMemoryInfo(ctypes.c_void_p(h), ctypes.byref(c), c.cb)
+        return c.PrivateUsage / 2 ** 20 if ok else 0.0
+    finally:
+        k.CloseHandle(ctypes.c_void_p(h))
+
+
 class SW:
     # 表示モード。True にすると画面とフィーチャツリーの更新を止めずに作る（作る過程を見せる・録画する用。遅くなる）
     SHOW = False
+    # SOLIDWORKS の確保メモリがこれを超えていて、文書が開いていなければ、接続時に再起動する
+    MEM_LIMIT_MB = 6000
 
     def __init__(self, params=None):
         """SOLIDWORKS に接続し，生成中だけ画面更新と視点のアニメーションを止める．params は設計値のモジュール．"""
         self.params = params
         self.app = wc.Dispatch(PROGID)
+        self._fresh()
         self.app.Visible = True
+        self.watch = DialogWatch(call0(self.app, "GetProcessID"))
+        self.watch.start()
         self._input_dim = self.app.GetUserPreferenceToggle(10)
         self.app.SetUserPreferenceToggle(10, False)   # 寸法作成時に値入力のダイアログを出さない
         self.app.CommandInProgress = not SW.SHOW      # 連続した API 呼び出しであることを伝える（処理が速くなる）
@@ -132,8 +262,37 @@ class SW:
         self.app.SetUserPreferenceStringValue(8, self.part_tpl)
         self.app.SetUserPreferenceStringValue(9, self.asm_tpl)
 
+    def _fresh(self):
+        """SOLIDWORKS がメモリを抱え込んでいて、文書を 1 つも開いていなければ、再起動する。
+
+        生成を何十回も続けると、文書をすべて閉じてもメモリが解放されずに溜まり、処理が遅くなって
+        リソース不足のダイアログで止まる。文書が開いているときは、人の作業中かもしれないので再起動せず、知らせるだけにする。
+        """
+        pid = call0(self.app, "GetProcessID")
+        mb = process_memory_mb(pid)
+        if mb < self.MEM_LIMIT_MB:
+            return
+        docs = call0(self.app, "GetDocuments") or ()
+        if len(docs):
+            print(f"  ! SOLIDWORKS が {mb:,.0f} MB を確保している。文書が {len(docs)} 件開いているので再起動しない（遅い場合は手で再起動する）")
+            return
+        print(f"  SOLIDWORKS が {mb:,.0f} MB を確保している（文書は開いていない）。再起動する")
+        M(self.app, "ExitApp")
+        self.app = None
+        for _ in range(120):                                   # プロセスが消えるまで待つ
+            if not process_memory_mb(pid):
+                break
+            time.sleep(0.5)
+        time.sleep(2)
+        self.app = wc.Dispatch(PROGID)
+
     def restore(self):
         """変更した SOLIDWORKS の設定を元に戻す．終了時に必ず呼ぶ．"""
+        self.dialogs = self.watch.stop()
+        if self.dialogs:
+            print(f"\n■ 生成中に出た SOLIDWORKS のダイアログ {len(self.dialogs)} 件（出ている間は処理が止まる）")
+            for d in self.dialogs:
+                print(f"  {d['seconds']:6.1f} 秒  [{d['title']}] {d['text'][:160]}{'  → 自動で進めた' if d['answered'] else ''}")
         self.app.CommandInProgress = False
         self.app.SetUserPreferenceToggle(10, self._input_dim)
         self.app.SetUserPreferenceToggle(111, self._prefs["toggle"])
@@ -1211,6 +1370,7 @@ class Asm(Doc):
         self._pn = {}                      # 構成部品名 -> その文書の基準平面名
         self._axis = None
         self._axes = {}                    # 軸番号 -> 基準軸（Y, Z。X は _axis）
+        self._flip = {}                    # 距離合致で合った向き（軸・距離の符号・面の向き -> flip）
 
     def stem(self):
         """拡張子を除いた文書名を返す．"""
@@ -1271,14 +1431,17 @@ class Asm(Doc):
 
     def _last_mate(self):
         """いちばん新しい合致のフィーチャ。"""
-        last, f = None, call0(self.doc, "FirstFeature")
-        while f is not None:
-            if call0(f, "GetTypeName2") == "MateGroup":
-                s = call0(f, "GetFirstSubFeature")
-                while s is not None:
-                    last = s
-                    s = call0(s, "GetNextSubFeature")
-            f = call0(f, "GetNextFeature")
+        if getattr(self, "_mate_group", None) is None:       # 合致のフォルダは 1 回だけ探す（毎回ツリー全体をたどると部品の数に比例して遅くなる）
+            f = call0(self.doc, "FirstFeature")
+            while f is not None:
+                if call0(f, "GetTypeName2") == "MateGroup":
+                    self._mate_group = f
+                    break
+                f = call0(f, "GetNextFeature")
+        last, s = None, call0(self._mate_group, "GetFirstSubFeature") if getattr(self, "_mate_group", None) is not None else None
+        while s is not None:
+            last = s
+            s = call0(s, "GetNextSubFeature")
         return last
 
     @timed("合致")
@@ -1290,7 +1453,11 @@ class Asm(Doc):
         """
         want = self.val(expr) * MM
         base = self.planes()[("right", "top", "front")[j]]
-        for flip in (False, True):
+        # どちら向きで付くかは、軸・距離の符号・部品の面の向きで決まる。前に合った向きを覚えて先に試す（付け直しを減らす）
+        i = ("right", "top", "front").index(what)
+        key = (j, want > 0, comp.Transform2.ArrayData[3 * i + j] > 0)
+        known = self._flip.get(key, False)
+        for flip in (known, not known):
             self.doc.ClearSelection2(True)
             self._pick((comp, what))
             self._pick(base)
@@ -1300,21 +1467,15 @@ class Asm(Doc):
             self.doc.ClearSelection2(True)
             if m is None:
                 continue
-            if abs(comp.Transform2.ArrayData[9 + j] - want) > 1e-7:
-                M(self.doc, "EditRebuild3")
+            # 合致を足した時点で構成部品は動いている。ここで再構築しても判定は変わらない（実測 73 回中 0 回）ので、再構築しない
             feat = self._last_mate()
             if abs(comp.Transform2.ArrayData[9 + j] - want) < 1e-7:
+                self._flip[key] = flip
                 dd = call0(feat, "GetFirstDisplayDimension") if feat is not None else None
                 if dd is not None:
                     self.link(M(dd, "GetDimension2", 0), expr)
                 else:
                     self.warn(f"距離合致の寸法が見つからない: {expr}")
-                label = self.labels.get(str(expr))
-                if label and feat is not None:
-                    try:
-                        feat.Name = f"{label}（{comp.Name2}）"
-                    except Exception:
-                        pass
                 return m
             if feat is not None:                       # 反対側に付いた。消して向きを変える
                 self.doc.ClearSelection2(True)
@@ -1453,6 +1614,44 @@ class Asm(Doc):
             f.Select2(False, 0)                        # − 方向へ並んだので向きを変えてやり直す
             M(self.doc, "EditDelete")
         raise RuntimeError(f"構成部品の直線パターンに失敗: {name}")
+
+    @timed("構成部品パターン")
+    def driven(self, comp, host, feature, name):
+        """構成部品を、相手の部品 host が持つパターン feature に従わせて並べる（パターン駆動構成部品パターン）。
+
+        comp は構成部品 1 個か、そのリスト（ねじと座金など）。パターンの 1 個目の位置に合致で拘束しておく。
+        feature は host の部品の中のフィーチャ名で、穴ウィザード（点が複数）、直線パターン、円形パターンなどを指す。
+        穴の個数や位置を変えると、従う部品も一緒に変わる。ねじの位置を式で持たなくて済む。
+        増えた構成部品のリストを返す。
+        """
+        comps = list(comp) if isinstance(comp, (list, tuple)) else [comp]
+        drv = M(host, "FeatureByName", feature)
+        if drv is None:
+            raise RuntimeError(f"パターン駆動の元になるフィーチャが無い: {host.Name2} / {feature}")
+        root = M(self.doc.ConfigurationManager.ActiveConfiguration, "GetRootComponent3", True)
+        before = {c.Name2 for c in (call0(root, "GetChildren") or ())}
+        self.doc.ClearSelection2(True)
+        for c in comps:
+            M(c, "Select4", True, self._mark(self.doc.SelectionManager, 1), False)
+        if not M(drv, "Select2", True, 2):
+            raise RuntimeError(f"パターン駆動の元になるフィーチャを選べない: {host.Name2} / {feature}")
+        M(self.doc, "InsertDerivedPattern")
+        self.doc.ClearSelection2(True)
+        new = [c for c in (call0(root, "GetChildren") or ()) if c.Name2 not in before]
+        if not new:
+            raise RuntimeError(f"パターン駆動構成部品パターンに失敗: {name}（1 個目がパターンの元の位置にあるか、"
+                               f"{feature} がパターンか点が複数の穴かを確かめる）")
+        f, found = call0(self.doc, "FirstFeature"), None
+        while f is not None:                           # いま出来たパターンのフィーチャに名前を付ける
+            if call0(f, "GetTypeName2").startswith("Derived"):          # 穴に従うものは DerivedHolePattern
+                found = f
+            f = call0(f, "GetNextFeature")
+        if found is not None:
+            try:
+                found.Name = name
+            except Exception:
+                pass
+        return new
 
     def leaves(self):
         """部品の構成部品をすべて返す（サブアセンブリの中も含む）。"""
